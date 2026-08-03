@@ -1,0 +1,12 @@
+# verified working combination (see README for measured rig)
+torch>=2.5
+transformers==4.56.2
+timm==0.9.16          # openvla's remote code hard-rejects timm>=1.0.0
+bitsandbytes>=0.45
+accelerate>=1.0
+huggingface_hub>=0.30
+pillow
+numpy
+psutil
+# only needed for --real-frames (pulls LIBERO episodes)
+lerobot>=0.4

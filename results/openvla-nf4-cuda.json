@@ -1,0 +1,39 @@
+{
+ "label": "openvla-nf4-cuda",
+ "model": "openvla/openvla-7b",
+ "dtype": "nf4",
+ "device": "cuda",
+ "load_seconds": 14.09,
+ "weights_gb": 4.169,
+ "peak_vram_gb": 4.317,
+ "peak_host_rss_gb": 2.574,
+ "latency_ms": {
+  "mean": 136.16,
+  "p50": 135.94,
+  "p90": 136.78,
+  "p99": 138.21,
+  "min": 135.04,
+  "max": 138.21,
+  "iters": 10.0
+ },
+ "control_hz": 7.36,
+ "fidelity": {},
+ "notes": [
+  "unnorm_key=austin_buds_dataset_converted_externally_to_rlds; action dim=(7,)",
+  "peak VRAM reserved 7.413 GB",
+  "single-step action prediction (OpenVLA emits one action per forward)",
+  "synthetic image: valid for memory/latency; task success needs LIBERO",
+  "saved actions (8, 1, 7) -> ../results/actions/openvla_nf4.npy"
+ ],
+ "env": {
+  "torch": "2.10.0+cu128",
+  "cuda_build": "12.8",
+  "python": "3.11.15",
+  "platform": "Linux-6.8.12-060812-generic-x86_64-with-glibc2.31",
+  "cpu_count": 32,
+  "gpu": "NVIDIA RTX 5000 Ada Generation Laptop GPU",
+  "gpu_total_gb": 16.82,
+  "compute_capability": "8.9",
+  "driver": "535.183.01"
+ }
+}

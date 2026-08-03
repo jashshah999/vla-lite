@@ -1,0 +1,553 @@
+{
+  "summary": "Scope which robotics/VLA or VLM model to make run on cheap consumer hardware: demand, prior art, licensing, feasibility, hero result",
+  "agentCount": 6,
+  "logs": [
+    "6/6 scoping streams done"
+  ],
+  "result": {
+    "streams": [
+      {
+        "stream": "pi0-openpi-state",
+        "summary": "I verified openpi's (Physical-Intelligence/openpi, 13.1k stars, Apache-2.0 code license) published memory requirements, pulled real architecture parameters from source (pi0.py/pi0_config.py/gemma.py/model.py), enumerated every OOM/quantization/Jetson/CPU issue and PR via gh search+api, checked huggingface/lerobot's native PyTorch pi0/pi0.5/pi0-FAST port for quantization support, confirmed the checkpoint license situation (Apache-2.0 code + a bundled Gemma Terms-of-Use obligation for the weights), and ruled out a HuggingFace GGUF false-positive (a same-named but unrelated Qwen2.5-32B LLM called 'pi0'). The single most consequential finding, which the task brief did not anticipate: a real, actively-shipping competitor (FastCrest/tether, pip-installable, PyPI v0.12.0) already targets almost exactly this niche — ONNX/TensorRT export and edge deployment of pi0/pi0.5/SmolVLA/GR00T N1.6 across Jetson/RTX/Apple Silicon/AMD/CPU — and its own author has also published a technically serious distilled pi0.5 checkpoint. I could not independently reproduce Tether's self-reported benchmark numbers, could not verify PI's actual production re-planning cadence (relevant to whether CPU inference is viable when amortized over the 50-step action chunk), and could not resolve why PyPI's release-history API shows only one version despite Tether's changelog referencing many prior releases — these are flagged as unverified rather than asserted.",
+        "findings": [
+          {
+            "claim": "openpi's published minimums are: Inference > 8 GB VRAM (example: RTX 4090), LoRA fine-tuning > 22.5 GB (RTX 4090), full fine-tuning > 70 GB (A100/H100 80GB).",
+            "evidence": "github.com/Physical-Intelligence/openpi README, 'Requirements' table (fetched via gh api repos/Physical-Intelligence/openpi/readme).",
+            "confidence": "verified"
+          },
+          {
+            "claim": "A real (unmerged) benchmark PR measured pi0 inference at native bf16 using ~7.0-7.1 GB VRAM and ~30ms latency (~33Hz) on both NVIDIA H200 and AMD MI350; the PR text describes 'OpenPI Pi0 (3.5B)'.",
+            "evidence": "github.com/Physical-Intelligence/openpi PR #865 '[MI350] Optimized kernels benchmark (~30ms)', CLOSED (not merged), opened 2026-02-02. This means native-precision inference already comfortably fits an RTX 4090/RTX 5000 Ada 16GB card without any quantization — the README's '>8GB' is a conservative published minimum, not evidence of a hard memory wall.",
+            "confidence": "verified"
+          },
+          {
+            "claim": "Architecture (from source, not docs): PaliGemma backbone = SigLIP So400m/14 vision encoder + Gemma-2B decoder (variant 'gemma_2b': width=2048, depth=18, mlp_dim=16384, num_heads=8, num_kv_heads=1, head_dim=256, vocab=257,152); action expert = separate 'gemma_300m' transformer (~311M params: width=1024, depth=18, mlp_dim=4096). Flow-matching sampling defaults to num_steps=10 Euler integration steps. action_horizon (chunk size) = 50, action_dim = 32, image resolution = 224x224 across up to 3 camera views. Token length: 48 for pi0, 200 for pi0.5 (pi0.5 encodes robot state as discrete tokens instead of a continuous state_proj, and uses AdaRMS to inject the flow-matching timestep).",
+            "evidence": "src/openpi/models/pi0.py, pi0_config.py, gemma.py, model.py in Physical-Intelligence/openpi (read directly via gh api contents).",
+            "confidence": "verified"
+          },
+          {
+            "claim": "Fine-tuning memory (not inference) is the real, long-standing, still-open pain point. Issue #379 'Memory Exhausted Issue when Training with Pi0 Fine Tuned Lora' opened 2025-03-14, still OPEN with 23 comments (~17 months unresolved). Issue #677 'CUDA out of memory when using pytorch to finetune in RTX4090' opened 2025-09-19, still OPEN with 10 comments; the only fix is a community-posted workaround (swap AdamW for bitsandbytes AdamW8bit + move optimizer state to CPU) that was never merged upstream. PR #854 'Add PyTorch implementation of LoRA fine-tuning' is still OPEN/unmerged, confirming the README's own admission that PyTorch LoRA fine-tuning is not yet officially supported.",
+            "evidence": "github.com/Physical-Intelligence/openpi issues #379, #677 (full comment thread read via gh issue view), PR #854 (gh pr view).",
+            "confidence": "verified"
+          },
+          {
+            "claim": "Edge/Jetson deployment is unofficial, broken, and unresolved. Issue #386 'Deploying openpi0 on jetson orin encountered an error' (open since 2025-03-17, 16 comments). Issue #657 'Deployment on edge devices' (open since 2025-09-12, 5 comments) - a contributor reports Jetson Orin 64GB was insufficient for pi0 without quantization work, and that Thor deployment only worked via an unofficial Chinese-language blog reporting ~1 second per inference (vs. the pi0 paper's reported 73ms). Issue #826 'Jetson Thor support for Pi05' (open since 2025-12-10, 9 comments) remains unresolved as of a 2026-02-20 comment: CUDA13/JetPack7 incompatibilities, 'Invalid key(s) in state_dict' errors, and the model silently falling back to CPU instead of using the GPU.",
+            "evidence": "github.com/Physical-Intelligence/openpi issues #386, #657, #826 (full threads read via gh issue view).",
+            "confidence": "verified"
+          },
+          {
+            "claim": "Quantization work on the real pi0 model exists but is nascent, partial, and unmerged. The only quantization-specific issue is #897 'Partial VLM Quantization Shows Minimal LIBERO Impact' (opened 2026-03-04, 2 comments): PTQ using NVIDIA ModelOpt (FP8 and NVFP4) applied only to PaliGemma's MLP-projection weights, then dequantized back to bf16 at runtime for evaluation - i.e. an accuracy study with no actual memory or speed win, no kernel support, and no code merged into openpi. A search of openpi's full issue+PR history for 'GGUF', 'distill', 'pruning', 'consumer GPU', and any PR containing 'int8'/'fp8'/'quantiz' in the title returned zero results.",
+            "evidence": "github.com/Physical-Intelligence/openpi issue #897; gh search issues/PRs across terms quantization, int8, int4, fp8, GGUF, distill, pruning, \"consumer GPU\" against repo:Physical-Intelligence/openpi (see search transcript).",
+            "confidence": "verified"
+          },
+          {
+            "claim": "huggingface/lerobot ships its own native PyTorch pi0/pi0.5/pi0-FAST implementations (src/lerobot/policies/{pi0,pi05,pi0_fast}/modeling_*.py), independent of openpi's port, but has no quantization support beyond a bfloat16/float32 precision toggle. No lerobot issues exist for pi0 quantization, OOM, or CPU inference.",
+            "evidence": "grep of huggingface/lerobot src/lerobot/policies/pi0/modeling_pi0.py (only 'bfloat16'/'float32' precision literal, no int8/bitsandbytes/quant hits); gh search issues --repo huggingface/lerobot for 'pi0 quantiz' and 'pi0 memory OR pi0 OOM OR pi0 CPU' both returned zero results.",
+            "confidence": "verified"
+          },
+          {
+            "claim": "Checkpoint weight licensing is NOT simply Apache-2.0. The openpi repo bundles LICENSE_GEMMA.txt because the PaliGemma/Gemma-2B backbone weights are Google 'Model Derivatives' under the Gemma Terms of Use. Third parties CAN redistribute pi0/pi0.5 weights (including quantized derivatives - quantization is plausibly a 'modification'/'Model Derivative' under Gemma's broad definition), but must: carry the Gemma Terms of Use forward as enforceable terms to downstream recipients, provide the full Agreement text, mark modified files as modified, ship a Notice file ('Gemma is provided under and subject to the Gemma Terms of Use...'), and not violate Google's Gemma Prohibited Use Policy.",
+            "evidence": "github.com/Physical-Intelligence/openpi LICENSE (Apache-2.0) and LICENSE_GEMMA.txt (full Gemma Terms of Use text, read via gh api contents).",
+            "confidence": "verified"
+          },
+          {
+            "claim": "There are no GGUF or other quantized weights for the actual robotics pi0/pi0.5/pi0-FAST model on Hugging Face today. A same-named but unrelated model, 'infly/inf-o1-pi0' (a Qwen2.5-32B-Instruct finetune, a Chinese/multilingual text LLM), does have auto-generated GGUF quants from the mradermacher bot ('mradermacher/inf-o1-pi0-fixed-GGUF' etc.) - this is a naming coincidence, not evidence of VLA quantization, and is a plausible false-positive trap for less careful searches.",
+            "evidence": "huggingface.co/api/models?search=pi0 listing; huggingface.co/api/models/infly/inf-o1-pi0 shows base_model:Qwen/Qwen2.5-32B-Instruct and no robotics/lerobot tags.",
+            "confidence": "verified"
+          },
+          {
+            "claim": "A real, actively-shipping open-source competitor already occupies almost exactly the target niche. FastCrest/tether (GitHub org FastCrest, repo renamed from an earlier 'reflex-vla'/'reflex' naming; 77 stars, 18 forks, 146 open issues, pushed as recently as 2026-07-13) is a pip-installable CLI (fastcrest-tether, live on PyPI at v0.12.0) that does ONNX export + TensorRT execution provider + 'Triton fast kernels' (self-reported 2.5x vs PyTorch, ~12x vs plain ONNX Runtime on an A100) for pi0, pi0.5, SmolVLA, GR00T N1.6, and DreamZero WAM, explicitly targeting Jetson/RTX/Apple Silicon/AMD/CPU deployment, with ROS2 adapter starter kits and a bootstrap installer that detects hardware. Its own int8-quantization issue ('Add int8 quantization path for smolvla exporter', issue #4, filed the day the repo went public, 2026-04-29) is still OPEN - i.e. even this more mature incumbent has not closed the low-bit-quantization gap.",
+            "evidence": "github.com/FastCrest/tether (api confirmed real org+repo, README changelog, license field 'Other'/NOASSERTION not a standard OSI license); pypi.org/pypi/fastcrest-tether/json confirms the package is live (version 0.12.0); github.com/FastCrest/tether/issues/4.",
+            "confidence": "verified"
+          },
+          {
+            "claim": "The Tether/FastCrest author appears to be a genuine, technically serious operator, not just a marketer - but the pattern of self-promotion is a real yellow flag worth weighing. They posted an unsolicited plug for their repo (under the old name 'reflex-vla', with a personal email for 'design-partner' outreach) as a comment inside openpi issue #897, an unrelated PI0 issue thread. Separately, the same account published a technically substantive, Apache-2.0-licensed, 1-NFE (single-step) SnapFlow-distilled pi0.5 checkpoint on HF ('Rylinjames/pi05-snapflow-distill-1nfe') with real reported LIBERO numbers (29/30 = 96.7% vs teacher's 28/30 = 93.3%, at ~10x fewer denoising steps, ~$25 Modal training cost) - this is genuine, non-trivial distillation/optimization work in the same space, even if I could not reproduce the numbers myself. The GitHub account itself was created only in January 2026 (7 followers, 13 public repos) - young but not obviously fake.",
+            "evidence": "comment by rylinjames on github.com/Physical-Intelligence/openpi/issues/897 (2026-04-29); huggingface.co/api/models/Rylinjames/pi05-snapflow-distill-1nfe and its model card; github.com/users/rylinjames account metadata (created 2026-01-13).",
+            "confidence": "verified"
+          },
+          {
+            "claim": "Physical constraint that complicates a naive 'pi0 on CPU, Kimi-style' pitch: robot control loops have hard real-time deadlines that chat UIs do not, and the pi0 paper's headline latency figure (73ms) targets tight closed-loop re-planning (cited directly inside openpi issue #826). However, pi0's 50-step action-chunking (action_horizon=50) means one inference call plans 50 timesteps at once, so if a deployment can tolerate executing most of that chunk open-loop before re-inferring, the effective per-call latency budget is far more forgiving than 73ms - closer to 'seconds, not milliseconds', which is the regime where CPU inference (a la Kimi-on-CPU) becomes plausible. I could not verify what re-planning cadence Physical Intelligence actually uses in production (would require the pi0 paper Appendix D or DROID runtime code, not pulled here), so this is a reasoned hypothesis to validate empirically, not a confirmed number.",
+            "evidence": "action_horizon=50 in src/openpi/models/pi0_config.py; 73ms figure and re-planning framing quoted directly from github.com/Physical-Intelligence/openpi/issues/826 body text.",
+            "confidence": "unverified"
+          }
+        ],
+        "recommendation": "Do not greenlight the generic framing 'quantize pi0 and get it under 8GB VRAM / running on CPU' as the flagship deliverable -- on the evidence, that framing is weaker than the task brief assumed, for two independent reasons. First, it's already largely solved at native precision: a real (if unmerged) benchmark shows pi0 inference at bf16 uses only ~7GB and runs at ~30ms on H200/MI350 (openpi PR #865), which comfortably fits the RTX 5000 Ada's 16GB -- so 'inference in <=8GB' is closer to a demo than a research contribution. Second, and more important: this is not a greenfield gap the way LLM-on-CPU was -- FastCrest/tether is a real, live, pip-installable OSS project already doing ONNX/TensorRT export and Jetson/RTX/Apple-Silicon/AMD/CPU deployment for pi0, pi0.5, SmolVLA, and GR00T, with a still-open int8-quantization issue of its own. Building a second, more-generic version of the same thing risks shipping a worse clone into a niche someone else is actively working, with weekly releases. What IS still verifiably open, unsolved, and NOT covered by Tether: (1) fine-tuning memory -- issue #379 (23 comments, 17+ months open) and #677 (10 comments, still open, community-only bitsandbytes workaround never upstreamed) are real, long-standing pain with zero official or third-party tooling fix; this plays to the operator's CUDA/inference-optimization skill in an area Tether (an inference/deployment tool, not a training tool) doesn't touch at all. (2) Real low-bit inference kernels (int8/fp8/NVFP4 with actual measured speed+memory wins, not just openpi issue #897's dequant-to-bf16 accuracy study, and not just Tether's still-open, unresolved issue #4) -- this is the one piece of the 'GGUF-for-VLA' vision nobody has shipped yet, verified by the absence of any merged PR on either project. (3) The CPU-inference-via-chunk-amortization angle is the most genuinely novel, most Kimi-analogous idea I found no prior art for at all -- but it rests on an unverified assumption (how much of the 50-step action chunk can be executed open-loop before re-planning is needed) that must be validated empirically on the dev rig (RTX 5000 Ada + 32-core/125GB CPU box) before committing resources, since if real deployments re-plan every 5-10 steps rather than every 50, the CPU-latency budget collapses back toward sub-second and the pitch weakens substantially. Any release of quantized pi0/pi0.5 weights, whichever direction is chosen, must ship with the Gemma Terms of Use + Notice text (verified requirement in openpi's own LICENSE_GEMMA.txt) -- a solvable compliance step, not a blocker, but one to build into the release process from day one rather than bolt on later. Finally, flag two loose ends for whoever picks this up: I could not reproduce or verify Tether's self-reported benchmark numbers (parity deltas, Triton speedups, LIBERO parity-gate results), and PyPI's release-history API showed only one version for fastcrest-tether despite its README changelog referencing many prior releases (v0.5.x through v0.11.x) -- worth a direct look before treating Tether's maturity claims as settled fact."
+      },
+      {
+        "stream": "other-vla-targets",
+        "summary": "Researched 6 alternative VLA targets plus new 2026 entrants via gh api/search (GitHub) and huggingface.co API (no general web search available). Verified stars/downloads/license/issue signals for SmolVLA, OpenVLA/OpenVLA-OFT, NVIDIA GR00T N1.5/1.6/1.7, ACT/Diffusion Policy, RDT-1B, and Octo, plus MolmoAct2/X-VLA/RDT2-VQ/Xiaomi-Robotics-0 as new candidates. The single biggest finding, which reframes the whole stream: the parent hypothesis that \"no GGUF/llama.cpp analog exists for VLA\" is false as of mid-2026 - an Apache-2.0 project called vla.cpp (VinRobotics, 129 stars, arXiv:2606.08094) already ships CPU/CUDA/Metal GGUF runtimes for 11 VLA architectures including SmolVLA, pi0/pi0.5, GR00T N1.x, and OpenVLA-OFT, benchmarked down to a Jetson Orin Nano 8GB. This does not kill the opportunity but narrows it to: (a) properly quantizing/speeding up an already-covered model (vla.cpp's own quantization is naive and unclaimed as issue #16), or (b) filling a real remaining gap - base OpenVLA-7B (not OFT) has zero GGUF/edge coverage and long-open official quantization bugs despite being the single most-downloaded VLA checkpoint found (143k HF downloads). GR00T has the loudest raw demand signal of anything examined but its weights carry a confirmed non-commercial-only NVIDIA License clause that blocks the \"publish so people can use it\" goal for any commercial/general redistribution. ACT/Diffusion Policy and Octo were confirmed not to have a real hardware-affordability problem (models already tiny / project abandoned). Could not verify: depth of MolmoAct2/X-VLA edge-quantization demand (time-boxed out), and whether Alpamayo (NVIDIA driving VLA) carries a similar non-commercial license to GR00T (flagged but not checked).",
+        "findings": [
+          {
+            "claim": "CRITICAL / CROSS-CUTTING: The parent thesis that 'VLA policies have no llama.cpp/GGUF-style ecosystem' is FALSIFIED as of mid-2026. github.com/VinRobotics/vla.cpp (Apache-2.0, 129 stars, 25 forks, arXiv:2606.08094, active commits through 2026-07-21) already wraps llama.cpp into a C++ VLA runtime shipping single-file self-contained GGUFs for SmolVLA, pi0, pi0.5, GR00T N1.5/1.6/1.7, BitVLA, Evo-1, VLA-Adapter, OpenVLA-OFT, and VLA-JEPA, running on CPU (x86/ARM), CUDA, and Apple Silicon, benchmarked down to a Jetson Orin Nano 8GB and an Apple M4.",
+            "evidence": "github.com/VinRobotics/vla.cpp README (fetched via raw.githubusercontent.com/VinRobotics/vla.cpp/main/README.md) roadmap table + benchmark table; gh api repos/VinRobotics/vla.cpp -> 129 stars, license Apache-2.0, created 2026-05-26, pushed 2026-07-21, 3 open issues",
+            "confidence": "verified"
+          },
+          {
+            "claim": "vla.cpp's current 'quantization' is naive: scripts/quantize_gguf.py only repacks LM-backbone weight matrices to Q8_0/Q4_0 with no calibration; the vision tower and action head stay float. A proper 'Quantized inference support' feature is tracked as open issue #16 (0 comments) - i.e. the real quantization work this project's target skillset (CUDA/TensorRT) would add is unclaimed.",
+            "evidence": "https://github.com/VinRobotics/vla.cpp README 'Quantization' section; gh api repos/VinRobotics/vla.cpp/issues -> issue #16 'Quantized inference support', opened 2026-07-16, 0 comments",
+            "confidence": "verified"
+          },
+          {
+            "claim": "Even with vla.cpp's existing CPU/edge path, real-time performance on affordable Jetson hardware is still far from usable: pi0 = 1955 ms/call (~0.5 Hz) on a Jetson Orin Nano 8GB; smolvla = 567 ms/call (~1.8 Hz) on the same board; gr00t_n1_7 = 755 ms/call on Apple M4. This is the concrete, unclaimed 'make it fast, not just runnable' gap.",
+            "evidence": "vla.cpp README benchmark table (raw.githubusercontent.com/VinRobotics/vla.cpp/main/README.md, 'Benchmarks' section)",
+            "confidence": "verified"
+          },
+          {
+            "claim": "OpenVLA-7B (base, MIT license, 143,762 HF downloads - the single most-downloaded VLA checkpoint found in this research) has long-standing, still-open, official quantization bugs: #286 (INT4 via bitsandbytes fails with a .to() ValueError, open since 2025-07-30, only worked around by community members downgrading accelerate) and #287 (same class of bug, open). Issue #324 (2026-03-04, 0 comments) shows a user got FP8/NVFP4 PTQ via NVIDIA ModelOpt down to 4.44 GB with no accuracy loss on LIBERO but never packaged it as distributable weights or a runtime - a fully unclaimed opportunity.",
+            "evidence": "https://github.com/openvla/openvla/issues/286, /287, /324, /311 ('cant run on multi-GPU rigs with <=11GB cards', open, 0 comments); HF api model card openvla/openvla-7b: license mit, downloads 143762",
+            "confidence": "verified"
+          },
+          {
+            "claim": "vla.cpp covers OpenVLA-OFT (the faster fine-tuned variant) but explicitly does NOT cover base OpenVLA-7B - confirmed absent from its Roadmap support-matrix table. The existing OFT GGUF (vrfai/openvla-oft-libero-gguf) has 12,122 HF downloads, is MIT-licensed, but its own benchmark table shows only one data point (RTX 3090, ~233ms/call, no Jetson/edge number yet).",
+            "evidence": "vla.cpp README Roadmap table (11 models listed, OpenVLA base not among them); HF api huggingface.co/api/models/vrfai/openvla-oft-libero-gguf -> downloads 12122, license mit, gguf.totalFileSize 15.07GB bf16; model README benchmark table shows only RTX 3090 numbers",
+            "confidence": "verified"
+          },
+          {
+            "claim": "NVIDIA Isaac GR00T weights (all N1.x variants, GR00T-H) are licensed under a custom 'NVIDIA License' with an explicit non-commercial-use clause: Section 3.3 states the Work and derivative works 'only may be used or intended for use non-commercially...NVIDIA Corporation and its affiliates may use the Work...commercially.' This blocks redistributing quantized/derived GR00T weights for general commercial use. Confirmed independently: vla.cpp's own GR00T GGUF conversions on HF are tagged license:'other' (not relicensed permissively), correctly inheriting the restriction.",
+            "evidence": "https://huggingface.co/nvidia/GR00T-N1.7-3B/raw/main/LICENSE (full text fetched); HF api vrfai/gr00tn1d7-libero-gguf and vrfai/gr00tn1d5-libero-object-gguf both show cardData.license='other'. Note: the *code* repo NVIDIA/Isaac-GR00T is Apache-2.0 per gh api, but that only covers runtime/training code, not the weights.",
+            "confidence": "verified"
+          },
+          {
+            "claim": "GR00T has the strongest raw Jetson-deployment demand signal of any candidate examined (305 open issues total on NVIDIA/Isaac-GR00T), including unresolved TensorRT FP8/NVFP4 engine-build failures on Jetson Orin NX Super (#575, detailed repro, TRT 10.7.0 rejects FP8 Q/DQ layers on that hardware and is missing the TRT_FP4DynamicQuantize plugin), plus #712, #343 (12 comments), #544, #498 (9 comments), #516 (9 comments, closed). But a competing hand-written CUDA-kernel real-time engine already exists: 'FlashRT' (github.com/LiangSu8899/FlashRT, posted as Isaac-GR00T issue #660, 2026-05), claiming 22-24Hz on Jetson AGX Thor and 76-80Hz on RTX 5090 for GR00T N1.6/N1.7, with FP8 + LoRA training support. It explicitly does NOT yet support Jetson Orin (SM87) - the actually-affordable/common Jetson SKU - which remains the one narrow open gap.",
+            "evidence": "https://github.com/NVIDIA/Isaac-GR00T/issues/575, #660 (full issue body + comments fetched via gh issue view), #343, #544, #498, #516; gh api repos/NVIDIA/Isaac-GR00T -> 7732 stars, 305 open issues, license Apache-2.0 (code only)",
+            "confidence": "verified"
+          },
+          {
+            "claim": "ACT and Diffusion Policy (LeRobot's default small policies, ~27-100M params) do not have a genuine 'can't afford the hardware' problem to solve. Targeted issue search for raspberry-pi/CPU-inference pain in huggingface/lerobot turned up only camera/driver bugs (e.g. #1699, #1682 - Raspberry Pi 4 camera/ffmpeg issues), not model-compute-cost complaints. The only diffusion-policy-specific bugs found (#3861, #3445) are async-inference orchestration crashes, unrelated to hardware affordability.",
+            "evidence": "gh search issues raspberry --repo huggingface/lerobot (10 results, all camera/hardware-driver related, not model-compute); gh search issues onnx/tensorrt/jetson --repo huggingface/lerobot (issues #3146, #3636, #2363, #3098, #819 - all about SmolVLA/pi05/general policies, none specifically flag ACT/DP as too heavy)",
+            "confidence": "verified"
+          },
+          {
+            "claim": "Octo (rail-berkeley/octo-models) is functionally abandoned: last GitHub push 2024-07-31 (2+ years stale as of Aug 2026). Its own ONNX/TensorRT export feature request (#171) sits open with 0 comments, alongside dozens of other 0-comment open issues. Models are tiny already (Octo-Base 93M, Octo-Small 27M params per its own README) so there is no real affordability problem to solve, and the project's inactivity makes any contribution unlikely to be merged or noticed.",
+            "evidence": "gh api repos/octo-models/octo -> pushed_at 2024-07-31, license MIT, 1724 stars; gh api repos/octo-models/octo/issues (paginated) shows issue #171 'Feature: add model export to ONNX/TensorRT for deployment', 0 comments, open; raw README.md grep shows 93M/27M param counts",
+            "confidence": "verified"
+          },
+          {
+            "claim": "RDT-1B (thu-ml/RoboticsDiffusionTransformer, MIT license) has a comparatively small real deployment user base: the actual weights repo (robotics-diffusion-transformer/rdt-1b) has only 467 HF downloads, versus tens of thousands for SmolVLA/OpenVLA/GR00T. Its documented VRAM pain is almost entirely about the T5-XXL text encoder needed at fine-tune time (>24GB), which the README already resolves via a documented precompute-embeddings workaround - this is a training-infra problem, not an inference-hardware-cost problem. The newer RDT2-VQ (Qwen2.5-VL-7B-based, Apache-2.0) has far more traction (8,351 downloads) but is a different, much larger model, not 'RDT-1B'.",
+            "evidence": "HF api robotics-diffusion-transformer/rdt-1b -> downloads 467; raw README.md grep shows T5-XXL VRAM guidance and 4-bit/8-bit quantization already suggested as a training-time workaround; HF api robotics-diffusion-transformer/RDT2-VQ -> downloads 8351, license apache-2.0, base_model Qwen/Qwen2.5-VL-7B-Instruct",
+            "confidence": "verified"
+          },
+          {
+            "claim": "A 16GB consumer GPU (the target's own RTX 5000 Ada laptop) can barely hold OpenVLA-7B in bf16 (~14GB weights alone, before KV-cache/activations) with zero headroom - meaning int4/int8 quantization is not a nice-to-have but a hard requirement to comfortably serve this model on the exact hardware class the project is targeting, making OpenVLA-7B a strongly self-dogfooding choice.",
+            "evidence": "Standard bf16 memory arithmetic (7B params x 2 bytes = ~14GB) cross-checked against HF api openvla/openvla-7b (safetensors, transformers library); consistent with issue #311 ('cant run on multi-GPU rigs with <=11GB cards') and #57 ('how much memory is needed to run this model?')",
+            "confidence": "likely"
+          },
+          {
+            "claim": "Several credible new-in-2026 open VLA models exist outside the requested list and are not yet covered by vla.cpp's roadmap, representing possible but under-evidenced greenfield: AllenAI's MolmoAct2 (Apache-2.0 code, 692 stars on its own repo created ~2026-05, 4,912 HF downloads on the merged checkpoint) is the most credible/well-backed of these. X-VLA (2toINF, Florence-2-large based, Apache-2.0, 8,291 downloads), RDT2-VQ (Apache-2.0, 8,351 downloads), and Xiaomi-Robotics-0 (Apache-2.0, 3,890 downloads) are real but modest, with no edge/quantization demand signal surfaced in the time available for this research pass.",
+            "evidence": "gh api repos/allenai/molmoact -> 379 stars Apache-2.0; gh search repos MolmoAct -> allenai/molmoact2 692 stars; HF api models for allenai/MolmoAct2, 2toINF/X-VLA-Pt, robotics-diffusion-transformer/RDT2-VQ, XiaomiRobotics/Xiaomi-Robotics-0-LIBERO (downloads/likes/license fetched)",
+            "confidence": "likely"
+          },
+          {
+            "claim": "SmolVLA (lerobot, ~450M params per its paper/HF card, Apache-2.0) has the largest, most active, fully-permissive community of any candidate (parent repo huggingface/lerobot: 26,349 stars, 743 open issues; smolvla_base checkpoint: 70,439 downloads, 409 likes) and real unresolved pain beyond vla.cpp's existing coverage: lerobot#3146 (open feature request for official ONNX/TensorRT export, 4 comments, unaddressed), lerobot#3098 (open request for a low-VRAM 2-process eval path for <=8GB GPUs specifically for smolvla/libero), and lerobot#3636 (open, 2026-05-20: SmolVLA on Jetson Orin ARM64 produces incorrect results vs. the same model on x86_64 - a real, unresolved correctness bug, not just a speed problem).",
+            "evidence": "gh api repos/huggingface/lerobot -> 26349 stars, 743 open issues, license Apache-2.0; HF api lerobot/smolvla_base -> downloads 70439, likes 409; gh search issues onnx/jetson --repo huggingface/lerobot -> issues #3146, #3098, #3636",
+            "confidence": "verified"
+          }
+        ],
+        "recommendation": "Rank order for this stream, with the single most important caveat first: the parent hypothesis (\"no GGUF/llama.cpp analog exists for VLA\") is false as of mid-2026 - vla.cpp already exists, is Apache-2.0, and covers 11 VLA architectures including SmolVLA, pi0/pi0.5, and GR00T N1.5/1.6/1.7 on CPU/CUDA/Metal down to a Jetson Orin Nano 8GB. Do not pitch \"build the GGUF ecosystem for VLA\" as a greenfield idea - it will read as uninformed. The real opportunity is narrower and technical: (1) OpenVLA-7B (base, MIT, 143k HF downloads, largest single audience found) is the top pick - it has long-open (~1yr), officially-unfixed int4 quantization bugs (#286/#287), an unclaimed FP8/NVFP4 PTQ proof-of-concept with no shipped weights or runtime (#324), zero existing GGUF/edge coverage (vla.cpp only did the OFT variant), MIT license (fully redistributable), and its 7B/bf16 footprint (~14GB) barely fits the target's own 16GB card - making this a genuinely dogfooded \"make the LLM-shaped VLA run on cheap hardware\" story that mirrors the Kimi-on-CPU inspiration almost exactly (it has a literal Llama-2-7B backbone). (2) SmolVLA is the strong second/fast-follow pick: biggest, most active, fully permissive community, but reframe it as \"fix + speed up + properly quantize\" (real, calibrated int4/int8 + fixing the open Jetson ARM64 correctness bug lerobot#3636) rather than \"add support\" - vla.cpp already ships a working-but-slow-and-crude path, and vla.cpp's own open issue #16 (\"Quantized inference support\") is a concrete, unclaimed contribution target if the preference is to build on an existing project rather than launch a competing one. (3) Explicitly flag GR00T N1.5/1.6/1.7 as a DEAD END for the \"publish so people can use it\" framing despite having the loudest demand signal of anything examined (305 open issues, detailed unresolved Jetson TensorRT FP8/NVFP4 failures) - its weights carry a non-commercial-only NVIDIA License clause that any quantized/derived artifact inherits (confirmed via vla.cpp's own GGUF conversions being tagged license:'other'). Treat it as research-demo-only if pursued at all, and note a competing CUDA-kernel engine (FlashRT) already claims the Jetson-Thor/RTX-5090 real-time niche, leaving only the narrow, less-glamorous Jetson-Orin (SM87) gap unclaimed. (4) Do not pursue ACT/Diffusion Policy or Octo - both fail the \"unsolved-ness\" test for different reasons: ACT/DP are already small enough to run on trivial hardware (no real affordability problem exists; searched issue trackers show only orchestration bugs, not compute-cost complaints), and Octo is a 27-93M-param, 2+-year-abandoned project whose own ONNX/TensorRT feature request sits unanswered - low user base, low signal, unlikely any contribution gets noticed or merged. (5) RDT-1B is low priority: real weights-download count (467) is an order of magnitude below the other serious candidates, and its one genuine memory pain point is a training-time T5-XXL-encoder issue already documented with a workaround, not an inference-hardware-affordability gap. (6) New 2026 entrants (MolmoAct2 especially - Apache-2.0, AllenAI-backed, 692 stars, growing fast) are worth a bookmark for a future pass but were not evidenced deeply enough in this time-boxed research to rank confidently today; don't commit engineering time there without a dedicated follow-up search for edge/quant demand signals first. Cross-stream note: whoever is comparing this against the main pi0/GR00T-N1.5 stream should weight the GR00T license finding heavily - it is a hard blocker for that stream's core deliverable, not just this one's."
+      },
+      {
+        "stream": "quantization-toolchain",
+        "summary": "I verified the brief's core premise is now false: a sophisticated GGUF/llama.cpp-based VLA inference runtime called vla.cpp (VinRobotics, Apache-2.0, 129 stars, 25 forks, arXiv:2606.08094) already exists and covers essentially every model the brief names — SmolVLA, pi0, pi0.5, GR00T N1.5/1.6/1.7, OpenVLA-OFT, BitVLA, Evo-1, VLA-Adapter, VLA-JEPA — on CPU/CUDA/partial-Metal, LIBERO-verified, down to an 8GB Jetson Orin Nano and an Apple M4. I confirmed via gh api/issue history that its own README and an open, unanswered issue (#16, filed 2026-07-16) reveal a real remaining gap: current \"quantization\" is weight-storage compression only (ggml_mul_mat dequantizes at compute time); the flow-matching/action-expert, embeddings, and output head are explicitly kept in float, and only one model (BitVLA) has a genuine low-bit compute kernel (a custom IMMA INT GEMM, 4.5x). I separately confirmed llama.cpp core itself still has no merged PaliGemma support (3 PRs, all open/closed-unmerged) and that the target person's own vla-serve repo currently ships zero measured results — its \"13x/16x\" numbers are explicitly labeled \"projected targets\" in its own README, with most models \"Planned\"/\"In progress.\" I could not verify Jetson, Mac/MLX, or PaliGemma-ONNX/TensorRT specifics beyond metadata since no such hardware is available locally and issue-tracker signal on that specific combination was too thin to read either way.",
+        "findings": [
+          {
+            "claim": "A dedicated, working GGUF/llama.cpp-based inference runtime for VLA policies already exists: VinRobotics/vla.cpp, Apache-2.0, created 2026-05-26, 129 stars, 25 forks, backed by arXiv:2606.08094 (8 authors). It natively runs SmolVLA, pi0, pi0.5, GR00T N1.5/1.6/1.7, BitVLA, Evo-1, VLA-Adapter, OpenVLA-OFT, and VLA-JEPA as self-contained GGUFs on CPU, CUDA, and (partial) Metal.",
+            "evidence": "github.com/VinRobotics/vla.cpp README + roadmap table; gh api repos/VinRobotics/vla.cpp -> stars 129, forks 25, created 2026-05-26T09:13:29Z; arXiv:2606.08094 abstract fetched via export.arxiv.org, states 'first ggml-class engine to natively serve the flow-matching and diffusion VLA inference pattern'",
+            "confidence": "verified"
+          },
+          {
+            "claim": "This directly falsifies the brief's premise that 'VLA policies have no GGUF ecosystem.' Their HF org (vrfai) has GGUF checkpoints with real download counts, e.g. vrfai/openvla-oft-libero-gguf at 12,122 downloads, gr00tn1d5/d6/d7-libero-gguf at 30-114 downloads each.",
+            "evidence": "huggingface.co/api/models?search=gr00t%20gguf and ?search=openvla%20gguf JSON responses, fields downloads/library_name:vla.cpp/pipeline_tag:robotics",
+            "confidence": "verified"
+          },
+          {
+            "claim": "Even this leading project has NOT solved real compute-level low-bit inference for the action expert — current quantization only repacks LM-backbone weight storage and dequantizes at compute time (no speed win from compute, only from bandwidth/size); the flow-matching/action-expert, embeddings, output head and norms are explicitly excluded and stay float; vision-tower packing is offered but flagged 'more accuracy loss.' A user (AIWintermuteAI) filed issue #16 on 2026-07-16 pointing out exactly this ('inference still runs in BF16... additional overhead from on-the-fly conversion') and it remains open with zero maintainer response as of now.",
+            "evidence": "github.com/VinRobotics/vla.cpp README Quantization section; gh issue view 16 --repo VinRobotics/vla.cpp (state OPEN, 0 comments, body quoted above)",
+            "confidence": "verified"
+          },
+          {
+            "claim": "The project's own roofline analysis found batch-1 VLA inference is compute-bound (not bandwidth-bound) on GPU, and their only genuine low-bit compute kernel is a custom IMMA-based ternary GEMM built for BitVLA specifically (4.5x latency cut) — this optimization has not been extended to the flow-matching/DiT action experts of pi0 or GR00T, which is exactly where the brief's cited demand signals (openpi #677 OOM, GR00T #130 poor fine-tune) concentrate.",
+            "evidence": "arXiv:2606.08094 abstract; repo layout src/kernels/bitvla/ (only custom-kernel dir) per docs/ARCHITECTURE.md; roadmap table shows no equivalent kernel work called out for other 10 model variants",
+            "confidence": "verified"
+          },
+          {
+            "claim": "vla.cpp's development velocity has stalled: ~14 PRs merged rapidly between May 26 and July 6, 2026 (including sophisticated work like cross-attention KV-caching across GR00T's denoising steps in PR #5, and a Metal backend), but zero merges since July 6 as of now (~4 weeks), with two external contributor PRs (#15, #17) sitting unreviewed and issue #16 unanswered. Only 3 open issues total, no HN presence (0 hits for 'vla.cpp').",
+            "evidence": "gh pr list/issue list --repo VinRobotics/vla.cpp timestamps; hn.algolia.com/api/v1/search?query=vla.cpp -> nbHits: 0",
+            "confidence": "verified"
+          },
+          {
+            "claim": "The target person's own OSS project, jashshah999/vla-serve (1 star), currently has no measured results: its README explicitly labels all benchmark numbers (including the 6.2x-16.4x figures, e.g. the '13x'-class claims referenced in the brief) as 'projected targets... Measured results will replace these as each optimization lands,' and marks most model rows 'Planned' or 'In progress,' not shipped.",
+            "evidence": "gh api repos/jashshah999/vla-serve/contents/README.md, benchmark table and italicized disclaimer quoted verbatim above",
+            "confidence": "verified"
+          },
+          {
+            "claim": "llama.cpp core (ggml-org/llama.cpp) still has no merged native PaliGemma support: PR #7553 ('Add PaliGemma Support') has been open and unmerged since May 2024; two later attempts, #22528 ('[mtmd] Add PaliGemma2 support') and #24200 ('Add Paligemma 1 support'), were both closed without merging (April/June 2026). PaliGemma is absent from the official supported-multimodal-model list in docs/multimodal.md.",
+            "evidence": "gh pr view 7553/22528/24200 --repo ggml-org/llama.cpp -> state/mergedAt fields; docs/multimodal.md contents fetched via gh api, no PaliGemma entry in Pre-quantized models list",
+            "confidence": "verified"
+          },
+          {
+            "claim": "The brief's cited demand signals are still live and partly worsening/expanding: openpi #677 (CUDA OOM on RTX 4090 finetuning) is OPEN with 10 comments; openpi #850 (slow LoRA finetune) is OPEN with 5 comments; Isaac-GR00T #24 (min GPU requirements) is now CLOSED, but #130 (poor finetune results) is still OPEN with 13 comments, and two more related open issues exist (loss-validation Q&A, 16 comments; camera-resolution crash, 3 comments). Critically, these are all fine-tuning/training-VRAM pain points, which vla.cpp (an inference-only runtime) does nothing to address.",
+            "evidence": "gh issue view 677/850 --repo Physical-Intelligence/openpi; gh issue view 24/130 --repo NVIDIA/Isaac-GR00T, state/comment counts as quoted",
+            "confidence": "verified"
+          },
+          {
+            "claim": "An MLX (Apple Silicon) story for VLA is real but extremely nascent and unrelated to vla.cpp: mohan007/pi05-mlx-4bit (May 2026) and two just-published repos, tokimoa/pi0-mlx and tokimoa/smolvla-mlx (created 2026-07-29, days before this research), all with near-zero downloads/likes.",
+            "evidence": "huggingface.co/api/models?search=pi0%20mlx and ?search=smolvla%20mlx JSON, createdAt/downloads/likes fields",
+            "confidence": "verified"
+          },
+          {
+            "claim": "ONNX Runtime / TensorRT / TensorRT-LLM issue trackers show almost no signal specifically about PaliGemma or SigLIP export failures (one unrelated closed onnxruntime diffusion-model issue found; no relevant TensorRT-LLM hits). This is inconclusive, not evidence of ease.",
+            "evidence": "gh search issues 'paligemma' --repo microsoft/onnxruntime --repo NVIDIA/TensorRT; gh search issues 'siglip' --repo NVIDIA/TensorRT-LLM — both near-empty result sets",
+            "confidence": "unverified"
+          },
+          {
+            "claim": "Ada Lovelace GPUs (compute capability 8.9, including the local RTX 5000 Ada) have real FP8 tensor-core support via the 4th-generation Tensor Cores, not just Hopper — making genuine FP8 compute-level quantization of a VLA action expert locally testable without needing to rent an H100.",
+            "evidence": "General Ada Lovelace architecture knowledge (not independently re-verified via a fetched source this session)",
+            "confidence": "likely"
+          }
+        ],
+        "recommendation": "Do not build \"a GGUF/llama.cpp runtime for VLA models\" as the brief originally frames it — that specific target is already shipped by a resourced, published competitor (VinRobotics' vla.cpp: 129 stars, arXiv paper, covers pi0/pi0.5/SmolVLA/GR00T-N1.5-1.7/OpenVLA-OFT/BitVLA on CPU+CUDA+partial-Metal, LIBERO-verified). Racing to rebuild that would be redundant and would age badly the moment anyone checks GitHub.\n\nInstead, pick the one concrete wedge even that leader has not closed, which also happens to be exactly this person's stated skill (CUDA/TensorRT/inference-optimization), and is verifiable on the one GPU in hand: implement genuine INT8/FP8 tensor-core COMPUTE (not storage-only weight packing) for the flow-matching/DiT action-expert submodule of pi0 or GR00T-N1.5. This is the specific, narrow, still-open ask in vla.cpp issue #16, unaddressed for weeks, and it is a small, self-contained model (tens of millions of params, not the full VLM backbone) — a realistic evenings/weekends scope. Concretely: (1) use vla.cpp's own Apache-2.0 GGUF checkpoints, LIBERO eval harness, and PyTorch-eager baseline as the three-way comparison scaffold so results are credible and apples-to-apples on day one, not invented from scratch; (2) build and benchmark the FP8/INT8 action-expert kernel on the local RTX 5000 Ada (Ada, fp8-capable) with real measured LIBERO success-rate and per-step-latency numbers; (3) ship it either as a PR back into vla.cpp (their license permits it and their 129-star/arXiv audience gives instant distribution — far higher leverage than growing a 1-star repo from zero) or as the first genuinely-measured row in vla-serve's benchmark table, replacing a \"projected target\" with a real number.\n\nExplicitly avoid: (a) claiming \"no VLA quantization ecosystem exists\" publicly — it's now false and a five-minute GitHub search contradicts it, which would cost credibility; (b) chasing Jetson-specific or Mac/MLX performance claims — no such hardware is available locally to verify, and both niches already have real (if small) claimants (vla.cpp's own Jetson benchmarks; tokimoa's fresh MLX ports), so any number produced would be exactly the kind of unverified \"projected target\" that already undermines vla-serve's current README; (c) chasing the openpi/GR00T fine-tuning-VRAM issues (#677, #850, #130) — those are training-side PEFT/LoRA-memory problems, a different and far more crowded skill area (bitsandbytes/PEFT territory) that doesn't match an inference-optimization background and is orthogonal to \"make an existing model run on cheap hardware for inference\"; (d) attempting a from-scratch ONNX/TensorRT export of the full PaliGemma+SigLIP+action-head pipeline — evidence on how hard that specific export is remains too thin to call, so the safer scope is to keep the vision-language backbone on vla.cpp's already-working ggml/CUDA path and swap in a custom TensorRT/CUDA kernel for only the action-expert compute, sidestepping the unverified VLM-export risk entirely."
+      },
+      {
+        "stream": "community-hardware-demand",
+        "summary": "I quantified hardware pain in the robot-learning community via gh api (lerobot, openpi, Isaac-GR00T issue trackers, sorted/filtered by VRAM/OOM/jetson/orin/raspberry/mps keywords), read the merged official lerobot hardware_guide.mdx, and cross-checked the competitive landscape (existing OSS/commercial projects already attacking this problem) plus two independent public experiments that measured whether weight quantization actually speeds up VLA inference. Verified: Jetson Orin Nano(8GB)/NX(16GB) is the single most-repeated real device across all three trackers, almost always blocked by dependency/packaging hell rather than raw compute; VRAM ceilings for pi0/pi0.5 fine-tuning are real and still causing OOM on A100-80GB as of recent lerobot issue activity; the SO-100/SO-101/LeKiwi hobby crowd mostly does NOT run VLA inference on-device at all (it offloads to a host GPU over lerobot's built-in async policy-server split), so 'cheap arm compute' and 'VLA inference compute' are two different hardware questions. I did not access discuss.huggingface.co or forums.developer.nvidia.com this session (GitHub issue data proved rich enough to deprioritize them) and did not verify current PyPI download counts for competitor tooling — flagging both as unverified. The most consequential finding is negative: two independent, credible public benchmarks (LaelaZorana/embodied-efficiency on T4/L4 GPUs; LuxxxLucy/realtime-vla-mac-phase0 on Apple M4) both concluded that weight-only low-bit quantization (the GGUF/llama.cpp playbook) does NOT speed up batch-1 VLA inference — it only shrinks memory footprint — because VLA models are small (150M-3B) and per-step-overhead-bound, not the memory-bandwidth-bound huge-model-decode regime where llama.cpp-style quantization pays off for LLMs.",
+        "findings": [
+          {
+            "claim": "Jetson Orin Nano (8GB) and Orin NX (16GB) are the single most-repeated real hardware target across lerobot, openpi, and Isaac-GR00T issue trackers, and the dominant pain is packaging/dependency hell (torchcodec has no aarch64 wheel, lerobot requires Python>=3.12 but JetPack 6.x ships Python 3.10, glibc mismatches, missing libcudss/libnvpl_lapack libs after JetPack/torch bumps) — not model size or raw compute.",
+            "evidence": "huggingface/lerobot#819 'support for running on Jetson?' (11 comments, opened 2025-03-05, closed-stale then reopened repeatedly, most recent comment building torch/torchcodec from source for Python 3.12 and explicitly cross-referencing roadmap item 4.10 in #3832 — still unresolved). huggingface/lerobot#2363 'no gpu used to train policy... migrate to TorchCodec' (4 comments) and #3636 'SmolVLA Inference on Jetson Orin Produces Incorrect Results' (1 comment) — a rigorous follow-up comment on #3636 ruled out the torchcodec/pyav decode backend as the cause of wrong robot actions (bit-identical on-device, only a <=3/255 cross-arch YUV rounding difference that didn't reproduce the bug), leaving the Jetson inference-correctness bug still open/unexplained. NVIDIA/Isaac-GR00T#343 'New Jetson Deployment setup' (JetPack/torch version churn breaking imports: libcudss.so.0, libnvpl_lapack), #405 'Facing issue while installing Isaac-GR00T on Nvidia Agx Orin board', #575 'TensorRT FP8/NVFP4 Engine Build Failures on Jetson Orin NX Super', #712 'VLA accuracy differs between Jetson AGX Orin and workstation'. Physical-Intelligence/openpi#386 'Deploying openpi0 on jetson orin encountered an error' (16 comments) and #826 'Jetson Thor support for Pi05' (9 comments, state_dict key errors).",
+            "confidence": "verified"
+          },
+          {
+            "claim": "VRAM ceilings for fine-tuning pi0/pi0.5-class VLAs are a real, current, and still partly unresolved pain point — OOM has been reported even on A100-80GB with lerobot's own documented default command, well above the official 70GB 'full fine-tune' floor.",
+            "evidence": "huggingface/lerobot#2216 'gpu memory required to finetune pi05' (7 comments): openpi README table cited directly — Inference >8GB (RTX 4090), LoRA fine-tune >22.5GB (RTX 4090), Full fine-tune >70GB (A100-80/H100). Comment from user 'grahamstelzer' shows a CUDA OOM on a fresh A100-80GB using the exact command from lerobot's own pi05 docs page (batch_size=32); workaround was dropping to batch_size=16. Follow-up from 'helloheidi' reports the same command that used ~40GB on lerobot v0.4.0 now OOMs on 80GB after upgrading — a version regression, partially tracked/fixed in #3251/#3254/#3454 ('memory usage regression due to double model construction in pi_gemma.py') but evidently not fully closed for all configs.",
+            "confidence": "verified"
+          },
+          {
+            "claim": "Low-VRAM (<=8GB) evaluation of SmolVLA/LIBERO was significant enough community pain that it is now an official lerobot v0.7.0 roadmap item, closing a community-contributed issue+PR — meaning HF itself is already actively addressing this specific gap, reducing the size of the opportunity for a new entrant on exactly this sub-problem.",
+            "evidence": "huggingface/lerobot#3098 (RTX 3070 Laptop 8GB, CUDA/EGL context collision during SmolVLA+LIBERO eval) leading to PR #3235 (process-isolated eval, `--eval.process_isolated=true`), explicitly listed in the Release-0.7.0 roadmap issue #3832, section 3 item 6: 'Low-VRAM evaluation path... enabling users with consumer hardware to run VLA policies.'",
+            "confidence": "verified"
+          },
+          {
+            "claim": "The SO-100/SO-101/LeKiwi hobby-arm crowd's actual compute story is bifurcated: cheap SBC/laptop for servo+camera I/O, with VLA model inference almost always offloaded to a separate, better-resourced host machine over lerobot's built-in async policy-server (ZMQ) split — so 'cheap arm hardware' and 'hardware running the VLA model' are largely two different machines today, not one.",
+            "evidence": "huggingface/lerobot#2478 'feat(async_inference): add support for LeKiwi' (closed/merged) and #2658 'Deserealization error when policy server runs cuda, and client runs cpu' both show the client/server split is a real, used pattern. Raspberry Pi issues in the tracker (#2015 'add support for Raspberry Pi cameras', #1699/#1682/#1738 'Raspberry Pi 4... camera error / ffmpeg / Installation') are all about the Pi as a camera/serial controller, none about running ACT/SmolVLA inference on the Pi's CPU. Official merged docs (docs/source/hardware_guide.mdx, from PR #3534) size training compute only, in the 2-40GB VRAM range across policy families, and state plainly under 'Where to run': 'CPU only — Don't train. Use Colab or rent a GPU' — inference-on-CPU isn't addressed at all, even rhetorically, in HF's own official guidance.",
+            "confidence": "verified"
+          },
+          {
+            "claim": "Two independent, methodologically careful public projects measured whether GGUF/llama.cpp-style weight-only low-bit quantization actually speeds up VLA inference, and both concluded it does NOT — it only reduces memory footprint (2-4x), while the real latency levers are CUDA graphs, fused/hardware-specific kernels, and action chunking. This directly undercuts the core premise of applying the LLM-quantization playbook to VLA models.",
+            "evidence": "github.com/LaelaZorana/embodied-efficiency (README + kernel/RESULTS.md, HF Space demo at hf.co/spaces/LaelaZ/embodied-efficiency): four separate experiments — hand-written Triton INT8/INT4 kernel, tensor-core+autotune rewrite, a 512-4096 size sweep, and production torchao/Marlin INT4 on a supported Ada-class L4 GPU — all showed INT4 running 1.2-1.6x *slower* than bf16 for batch-1 VLA flow-matching inference. Their stated conclusion: 'A batch-1 VLA sampler is small skinny GEMMs plus heavy non-GEMM per-step work, which isn't the regime weight-only int4 was built for (M=1 LLM decode of huge models). Here low-bit is a memory-footprint lever... not a speed one.' By contrast, CUDA-graph capture of the same sampler measured a genuine 5.9x speedup (4.82ms -> 0.82ms/step on a T4). Independently, github.com/LuxxxLucy/realtime-vla-mac-phase0 (pi0 on Apple M4) directly tested 'llama.cpp on the same prefix' vs MLX and found it 'within 5% of MLX — backend is not the lever'; their PyTorch/MPS baseline ran at only 0.8Hz, and reaching their shipped 2.90Hz required hand-engineered CoreML/ANE + Objective-C + GCD dispatch work, not quantization.",
+            "confidence": "likely"
+          },
+          {
+            "claim": "The 'ONNX/TensorRT export + Jetson deployment for VLA' niche implied by the LeRobot roadmap (#3146, #3832 item 3.9) is already occupied by an actively-shipping, comparatively well-resourced competitor with verified numerical parity claims across all four major open VLA families, materially reducing the differentiation available to a new solo entrant on that specific angle.",
+            "evidence": "github.com/FastCrest/tether (pip: fastcrest-tether; formerly promoted in lerobot issues as 'reflex-vla' by user rylinjames — see comments on lerobot #3098 and #3146). Repo stats: 77 stars, 18 forks, 819 commits by lead author + ~8 other contributors across roughly April-July 2026, releases every few days (v0.11.2 documented). Ships: monolithic ONNX export with verified parity (cos=+1.000000, max_abs ~1e-6 to 1e-7) for SmolVLA/pi0/pi0.5/GR00T N1.6; ONNX Runtime + TensorRT FP16 execution provider (5.55x measured speedup vs ORT-CUDA on an A10G); a full published Jetson platform matrix (Orin Nano 8GB -> AGX Orin 32/64GB -> Thor 128GB) with per-tier model recommendations explicitly including 'SO-100 hobby arms' on Orin Nano; SnapFlow distillation (96.7% LIBERO, beating the teacher); ROS2 bridge, Docker images per Jetson target, calibration/ECE metrics, and Stripe-gated Pro features. Its own docs/HARDWARE.md lists SmolVLA INT8 at 2GB VRAM and Pi0 FP8 at 10GB, but no corresponding implementation goal appears in the project's own GOALS.yaml (which only tracks FP16 monolithic export, TensorRT FP16, and FP16 distillation) — suggesting those specific INT8/FP8 numbers are aspirational/unverified marketing rather than a shipped, tested feature, itself a data point that even this well-resourced competitor hasn't proven real quantization wins.",
+            "confidence": "verified"
+          },
+          {
+            "claim": "A generic, actively-developed, credible 'llama.cpp alternative' Rust inference engine (444 stars) has explicitly named VLA (including Pi0.5 and a GR00T variant) as a near-term roadmap item as of the day this research was run, meaning the specific 'Kimi-on-CPU trick, applied to VLA' framing from the brief is on someone else's visible radar and could close within a similar timeframe to a solo evenings/weekends effort.",
+            "evidence": "github.com/lucasjinreal/Crane, tagline 'A Pure Rust based LLM, VLM, VLA, TTS, OCR Inference Engine... Alternate to your llama.cpp'. 444 stars, 46 forks, pushed_at 2026-08-03 (day of this research). README's model checklist lists 'Qwen3.5-VLA, Qwen3.5-GR00T, Pi0.5' under an unchecked '[ ] more to come' item — not yet implemented — while VLA generally is marked '(on the way)' in the abilities list. The same repo already ships GGUF loading, in-situ INT4/INT8 quantization (`--quant q4k|q8_0`), and INT4/INT8 KV-cache quantization for its LLM models, on CPU/CUDA/Metal, at a fast release cadence (multiple major features shipped per month in 2026) — so if the team pivots to VLA, they would bring an already-working quantization/runtime stack to it quickly.",
+            "confidence": "verified"
+          },
+          {
+            "claim": "Where actual real-time VLA speed has been achieved on constrained/edge hardware, it has come from custom CUDA-graph/kernel engineering targeted at high-end hardware (Jetson Thor, RTX 5090), not from quantizing an existing runtime — and none of the credible speed projects found target the truly cheap tier (Orin Nano 8GB, sub-$300 GPUs, or CPU-only boxes).",
+            "evidence": "NVIDIA/Isaac-GR00T#660: 'FlashVLA-realtime inference engine... GR00T N1.6 & N1.7 >22Hz on Thor, >76Hz on 5090', github.com/LiangSu8899/FlashRT — ~120 hand-written CUDA kernels composed into a static CUDA Graph, explicitly 'No ONNX, no .engine, no per-driver rebuild', posted directly into the GR00T tracker. Both headline numbers are on top-tier hardware (Jetson AGX Thor 128GB, RTX 5090); no comparable published number exists (in this survey) for Orin Nano 8GB or any CPU-only box.",
+            "confidence": "verified"
+          }
+        ],
+        "recommendation": "For THIS stream's question — which single device+model+control-rate unlock would delight the most people, with evidence — the honest answer is nuanced, not a clean green light. By raw mention-count, Jetson Orin Nano(8GB)/NX(16GB) running SmolVLA at ~20-30Hz is the most-named combination across lerobot, openpi, and Isaac-GR00T trackers, and it corresponds to real owned hardware (dockerfile/dependency bump PRs, live error logs from physical boards), not just wishlist chatter. BUT do not pursue this as 'quantize a VLA like GGUF/llama.cpp to make it fit/run fast on Jetson or CPU' — that specific framing is contradicted by two independent, credible measurements (embodied-efficiency on T4/L4; realtime-vla-mac on Apple M4) showing weight-only low-bit quantization does not speed up VLA inference (only shrinks footprint), and the 'ONNX+TensorRT export for Jetson' execution of the idea is already substantially built and actively shipped by FastCrest/tether (verified parity across 4 model families, Jetson platform matrix, 819 commits, near-weekly releases) plus a second competitor (FlashRT) already claiming >22Hz on Jetson-class hardware via hand-written kernels. A solo evenings/weekends effort competing head-on there faces a fast-moving, better-resourced incumbent with a multi-month head start. If the parent decision is going to point at hardware-constrained VLA inference at all, the more defensible, less-contested angle suggested by this data is: publish the first honest, real-robot-relevant control-rate benchmark for pure CPU-only inference of a small VLA (SmolVLA-scale) on hardware people already own outright with zero GPU/NPU (a many-core x86 box like the one available locally — 32 cores/125GB RAM — or a Raspberry Pi 5) — nobody in this survey has published that number, HF's own docs are silent on CPU inference entirely, and the two 'went fast on constrained hardware' precedents both stopped at a GPU or Apple Silicon NPU rather than plain CPU. Frame it around footprint + action-chunking-amortized control rate, not a false promise of GGUF-style raw speedup, since the evidence says that promise won't hold. Do not use Jetson Thor or RTX 5090 as the target device — those are exactly where FlashRT/Tether already claim the headline numbers; the cheap/consumer end of the spectrum (Orin Nano CPU fallback, old laptop CPUs, Pi 5) is the part nobody has measured."
+      },
+      {
+        "stream": "prior-art-and-credit",
+        "summary": "I re-verified all 6 named demand-signal issues (still mostly open/unresolved) and then ran a much wider prior-art sweep than the brief anticipated. Bottom line: the narrow claim \"no quantized/GGUF artifacts exist for pi0/OpenVLA/GR00T/SmolVLA on HF\" is TRUE and verified — every \"pi0 gguf\"/\"groot gguf\" hit on HF is a false-positive unrelated LLM coincidentally named pi0/GROOT. But the broader claim \"nobody is working on VLA quantization, gap is wide open\" is FALSE as of Aug 2026 and needs correction before other streams build on it: I found 8+ non-trivial, real, verifiable prior-art efforts (an actively-maintained 480-star Apache-licensed CUDA-kernel VLA runtime, a VC-style 77-star/840-commit startup CLI with BSL license covering ONNX/TensorRT export across pi0/pi0.5/SmolVLA/GR00T/OpenVLA, a stalled-but-substantial Intel-authored in-flight PR to add OpenVINO/CPU export to lerobot core, a 1269-star unified VLA toolbox, an academic wave of 6+ 2026 arXiv PTQ papers down to sub-4-bit with real code and HF checkpoints, and a 161-star from-scratch ternary VLA). None of these have become \"the llama.cpp of VLA\" — all are fragmented by model coverage, GPU-only, non-permissively licensed, or under 50 GitHub stars despite working code — and, critically, NONE of them have ever appeared on Hacker News (verified via Algolia: zero hits), meaning the robotics field has genuinely never had its llama.cpp/whisper.cpp/DeepSeek-1.58bit crossover moment. I also found a much more concrete, narrowly-scoped, still-unresolved pain point than the brief's list: OpenVLA-7b's own built-in bitsandbytes 4/8-bit quantization path has been broken (crashes, undocumented workarounds, ≤11GB multi-GPU sharding failures) for over a year across 3 separate open issues.",
+        "findings": [
+          {
+            "claim": "No quantized/GGUF/ONNX/TensorRT artifacts exist on HuggingFace for the actual pretrained VLA checkpoints (pi0, GR00T, OpenVLA-7b base, SmolVLA). All apparent hits are false positives.",
+            "evidence": "HF API search (huggingface.co/api/models?search=pi0 / groot / openvla / smolvla): the only 'pi0'+GGUF hits are mradermacher/inf-o1-pi0-fixed-GGUF, a quant of an unrelated Qwen2.5-32B LLM named 'pi0' by user jth01 (confirmed via huggingface.co/mradermacher/inf-o1-pi0-fixed-GGUF page). The only 'groot'+GGUF hits (Grootforce/bitnet_b1_58-3B-Q4_K_M-GGUF, talaviyabhavik/GROOT-3B-*-GGUF, mradermacher/GROOT-*-GGUF) are all unrelated LLM projects coincidentally named GROOT, not NVIDIA Isaac-GR00T. openvla and smolvla searches returned zero quantization-flagged results at all across 100 model listings checked.",
+            "confidence": "verified"
+          },
+          {
+            "claim": "FlashRT (flashrt-project/FlashRT, formerly LiangSu8899/FlashRT) is an active, credible, Apache-2.0 CUDA-kernel real-time inference engine already covering pi0, pi0.5, GR00T N1.6/N1.7, and Pi0-FAST, with FP8/NVFP4 quantization and real Hz benchmarks on Jetson AGX Thor and RTX 5090/4090/A100 — but no CPU path, no INT8/INT4, no OpenVLA/SmolVLA support.",
+            "evidence": "gh api repos/flashrt-project/FlashRT: 480 stars, 60 forks, Apache License 2.0, pushed 2026-08-03 (today). Issue body (github.com/NVIDIA/Isaac-GR00T/issues/660, author LiangSu8899): 'GROOT N1.6 | Jetson AGX Thor (SM110) | 45 ms (T=50) / 41 ms (T=16) | 22/24 Hz; GROOT N1.6 | RTX 5090 (SM120) | 13.08 ms (T=50, 2v) / 12.53 ms (T=16, 2v) | 76/80 Hz.' Community replies on that issue ask about Orin/SM87 and RECAP support, confirming real adoption interest, not just a repo sitting idle.",
+            "confidence": "verified"
+          },
+          {
+            "claim": "FastCrest Tether (github.com/FastCrest/tether, the project rylinjames referenced as 'reflex-vla' in a lerobot PR comment) is a startup-backed CLI that already does ONNX/TensorRT export with verified numerical parity across pi0, pi0.5, SmolVLA, GR00T N1.6, OpenVLA, and DreamZero-WAM — but is BSL-1.1 licensed (not permissive open source), GPU-required for its flagship path (CPU fallback exists but is explicitly the slow, non-primary path), and has no INT8/INT4/GGUF support.",
+            "evidence": "gh api repos/FastCrest/tether: 77 stars, 18 forks, 146 open issues, 840 commits, license 'Other' (BSL 1.1 per README, auto-converts to Apache-2.0 after 4 years), homepage fastcrest.com. Comment on huggingface/lerobot PR #3493 by rylinjames: 'VLA ONNX/TRT export for pi0, pi0.5, smolvla, and gr00t is already working in reflex-vla ... smolvla in particular took a bunch of patches to get right (broken kv cache wiring, wrong sinusoidal embedding, 5D vs 4D image dims).' Benchmark cited: SmolVLA monolithic on Modal A10G — TensorRT EP 19.49ms mean vs CUDA fallback 108.11ms mean.",
+            "confidence": "verified"
+          },
+          {
+            "claim": "dexmal/dexbotic is a well-funded, actively-maintained (1269 stars, pushed 4 days before this research) unified VLA training/inference toolbox covering pi0, GR00T N1, OFT/OpenVLA-OFT, MemVLA, Pi0.5, CogACT etc., with Triton-fused '5x' inference speedup and stated consumer-GPU (RTX 4090) support — but has zero mention of quantization, ONNX, TensorRT, or CPU inference anywhere in its README.",
+            "evidence": "gh api repos/dexmal/dexbotic: 1269 stars, 174 forks, created 2025-10-17, pushed 2026-07-30. Direct grep of README content (base64-decoded via gh api repos/dexmal/dexbotic/readme) for 'quant|onnx|tensorrt|int8|int4|cpu|gguf|fp8|awq|gptq' returned zero matches. Backed by org 'Dexmal' (dexmal.com, 'Build Intelligent, Useful and Trustworthy Robots').",
+            "confidence": "verified"
+          },
+          {
+            "claim": "HuggingFace's lerobot core team has an active, unresolved feature request (issue #3146, open since March 2026) for ONNX/TensorRT policy export, with at least 3 overlapping community PRs racing to fill it (one closed unmerged, two still open and stalled). The most substantial one (#3493, ~7100 lines, by Intel/OpenVINO maintainer samet-akcay) adds torch-free ONNX+OpenVINO runtime for ACT and PI05 — OpenVINO is CPU-capable — but has been stalled/merge-conflicted since May 1 2026 with no further activity.",
+            "evidence": "gh api repos/huggingface/lerobot/issues/3146 (open, 4 comments, created 2026-03-12). PR #2822 by samet-akcay: state=closed, merged=false. PR #3493 same author: state=open, mergeable=false, mergeable_state='dirty', updated_at=2026-05-01 (no change since creation despite ~3 months elapsed as of this research). PR #3521 (tsuu-abj, 3129 additions) also open, references/closes #3146, also unmerged. Separately, lerobot issue #1899 ('Has anyone tried to export smolvla as onnx?') closed with 4 comments; issue #3819 'add onnx support' still open with 0 comments as of June 2026.",
+            "confidence": "verified"
+          },
+          {
+            "claim": "OpenVLA-7b already ships basic bitsandbytes 4-bit/8-bit quantization support via `load_in_4bit`/`load_in_8bit`, but it has been broken and unresolved for over a year, and separately users report the 7B checkpoint (~21GB in bf16) cannot be run on GPUs ≤11GB even with multi-GPU sharding.",
+            "evidence": "openvla/openvla issue #286 (open since 2025-07-30, 4 comments): 'INT4 Quantization Fails with .to() Error in OpenVLA-7B' — ValueError: '.to is not supported for 4-bit or 8-bit bitsandbytes models.' Issue #287 (open since 2025-07-30, 3 comments): same failure mode during LIBERO eval with --load_in_4bit True; a user workaround exists in the comments but nothing was fixed upstream. Issue #311 (open since 2025-10-31): user with 8x RTX 2080 Ti (11GB each) reports device_map='auto' fails with cross-device concat errors, single-GPU .to('cuda:0') OOMs (needs ~21GB), and bitsandbytes 8-bit fails to import under their PyTorch 2.2.0 build — asks 'Could you clarify whether there's a supported way to run the 7B model on smaller GPUs ... or call out the ≥24GB GPU requirement in the docs?' with no official resolution visible.",
+            "confidence": "verified"
+          },
+          {
+            "claim": "2026 has seen a wave of academic post-training-quantization (PTQ) papers for VLA models, several with real released code and HuggingFace checkpoints achieving strong accuracy retention at 3-4 bits, but adoption/star counts remain thin (single digits to ~46 stars) and several repos are stale for months.",
+            "evidence": "arXiv abstracts fetched directly: Ω-QVLA (arXiv:2605.28803, ICLR'26, as AutoLab-SAI-SJTU/QVLA, 46 stars, stale since 2026-02-04) reports W4A4 quantization of pi0.5 (98.0% LIBERO success vs 97.1% FP16 baseline) and GR00T N1.5 (87.8% vs 87.0%), 71.3% memory reduction. ActQuant (arXiv:2605.24011, code at arashakb/ActQuant, MIT license, 9 stars, pushed 2026-06-19, has HF checkpoint NU-World-Model-Embodied-AI/ActQuant-Pi05-LIBERO-3bpw) reports OpenVLA-OFT 95.0% retention at 3bpw / 90.1% at 2.5bpw, and pi0.5 backbone compression 14.3GB→2.7GB (5.3x) with 94.8% retention at 3bpw, validated partly on a physical UR3 arm. QuantVLA (arXiv:2602.20309, CVPR'26, AIoT-MLSys-Lab/QuantVLA, 42 stars, 7 forks, stale since 2026-03-25) claims ~70% memory savings while matching/exceeding FP baseline on LIBERO. LiteVLA-Edge (arXiv:2603.03380) explicitly proposes '4-bit GGUF quantization and GPU-accelerated inference through the llama.cpp runtime' on Jetson Orin, but achieves only ~6.6Hz and no public code repository was found under that name.",
+            "confidence": "verified"
+          },
+          {
+            "claim": "BitVLA (ustcwhy/BitVLA) is real, actively-maintained academic prior art for extreme VLA quantization, but it is a from-scratch-trained ternary (1.58-bit) model on a BitNet backbone, not a post-hoc quantization of an existing popular checkpoint — a materially different problem from 'shrink pi0/GR00T/OpenVLA.'",
+            "evidence": "gh api repos/ustcwhy/BitVLA: 161 stars, 13 forks, 1 open issue, pushed 2026-03-02. arXiv:2506.07530 abstract/README: 94.8% average LIBERO success rate (vs non-pretrained OpenVLA-OFT 91.9%), 1.4GB memory (29.8% of OpenVLA-OFT's 15.4GB), VQA performance drops only 1.5pp.",
+            "confidence": "verified"
+          },
+          {
+            "claim": "None of the robotics-specific VLA efficiency projects found (FlashRT, dexbotic, BitVLA) have ever appeared on Hacker News — the LLM world's 'made X run cheap' viral moment (llama.cpp, whisper.cpp, unsloth's DeepSeek/Kimi dynamic-quant guides) has no robotics equivalent yet.",
+            "evidence": "hn.algolia.com/api/v1/search?query=FlashRT%20OR%20dexbotic%20OR%20BitVLA%20OR%20%22pi0%22%20robot returned nbHits:0, hits:[]. By contrast, llama.cpp's original Show HN (ggerganov, 2023-03-10) got 989 pts/284 comments, and its '30B runs with only 6GB RAM' PR (#613, 2023-03-31) got 1311 pts/414 comments — the single biggest viral spike, driven by a concrete memory number 3 weeks after launch, not the initial port.",
+            "confidence": "verified"
+          },
+          {
+            "claim": "The 'Kimi-class LLM on CPU' story the owner referenced is Unsloth's (danielhanchen) 'How to Run Kimi K2 / Kimi K2 Thinking Locally' guides, part of the same playbook they used for DeepSeek-R1's viral 1.58-bit dynamic quantization (Jan 2025): naive-vs-dynamic quantization comparison table, exact hardware, honest 'slow but works' CPU-only path.",
+            "evidence": "hn.algolia.com search confirmed HN stories 'Kimi K2: How to Run Locally' (docs.unsloth.ai, author simonpure) and 'Kimi K2 Thinking: How to Run Locally' (author danielhanchen). unsloth.ai/blog/deepseekr1-dynamic (fetched directly) shows the credibility table: naive 1.58-bit = 0% (gibberish/infinite repetition) vs their dynamic 1.58-bit = 69.2%, dynamic 2.22-bit = 91.7%, on a custom Flappy-Bird-generation pass@3 benchmark; concrete sizes (720GB→86-131GB) and speeds (140 tok/s on 2xH100, 14 tok/s single-user, '20GB RAM CPU-only, very slow' honestly caveated).",
+            "confidence": "verified"
+          },
+          {
+            "claim": "Re-verified status of the brief's 6 named demand-signal issues: all but one remain open/unresolved months later; the one closed issue (GR00T #24) was not actually resolved, just went stale.",
+            "evidence": "openpi #677: open, 10 comments, last activity 2025-10-28 (stale ~10 months). openpi #850: open, 5 comments, last activity 2026-01-20. Isaac-GR00T #24: closed 2025-04-18, but final comment (2025-07-08, after closure) still describes needing 2x24GB GPUs + freezing the vision backbone + forcing bf16 to fit a 4090 — i.e. closed by staleness, not by a real fix. Isaac-GR00T #130: open, 13 comments, last activity 2026-05-11. lerobot #2853: open, 16 comments, last activity 2026-05-29. lerobot #4117: open, created 2026-07-23, still active as of 2026-08-03 (today). lerobot #4153: open, created 2026-07-26, 1 comment.",
+            "confidence": "verified"
+          }
+        ],
+        "recommendation": "Do not hand downstream streams the brief's original framing unmodified (\"VLA quantization is a wide-open gap, nobody's doing this\") — it will lead to picking a target that either duplicates active work or gets outflanked by better-resourced players. Concretely:\\n\\n1. AVOID: generic 'TensorRT/FP8 speedup for pi0 or GR00T on NVIDIA GPUs/Jetson.' This lane is already occupied by FlashRT (480★, Apache-2.0, pushed literally today) built by someone with exactly the CUDA-kernel skill this engineer has — racing that head-on wastes the differentiation this person actually has (OSS shipping + benchmarking discipline, not novel kernel research).\\n\\n2. AVOID: 'build ONNX/TensorRT export for lerobot policies' as the whole deliverable. HF's own core (Intel-affiliated) contributor has a 7000+ line PR in flight for exactly this (stalled since May 2026 but could resume/merge any time) against a tracked feature request (#3146). If official support lands, a standalone export tool is instantly redundant. If this angle is used at all, position it as consuming ONNX once available and focusing on the layer nobody above has touched: quantization + CPU runtime + benchmark suite.\\n\\n3. STRONGLY CONSIDER, as the best-fit remaining target: OpenVLA-7b's broken bitsandbytes 4/8-bit path (issues #286, #287, #311 — all open 12+ months) combined with a genuine CPU-only inference demo on the 125GB-RAM/32-core dev box. This is narrow, concrete, has three live unresolved complaints to point to, and OpenVLA's architecture (standard Llama-2 backbone + vision tower + linear action head) is the one VLA in this whole landscape that's actually LLM-quantization-tooling-compatible — unlike pi0/GR00T's diffusion/flow-matching heads, which is exactly why 2026's academic PTQ papers (ActQuant, Ω-QVLA, QuantVLA) had to invent bespoke math for those and largely ignored OpenVLA. Fixing+shipping+benchmarking the boring, broken, already-half-built path is a better fit for an evenings/weekends AI-agent-driven project than out-inventing 2026's CVPR/ICLR PTQ authors.\\n\\n4. Whatever gets picked, the credibility-bar deliverables are non-negotiable and should be scoped into the plan from day one, not bolted on later: (a) LIBERO or equivalent success-rate table, full-precision vs quantized, per-task not just averaged; (b) exact hardware named (the specific GPU/CPU model, RAM/VRAM amount) — every project that got real traction here names silicon precisely; (c) control-loop Hz, not tokens/sec; (d) memory footprint in GB at the shipped quant level; (e) ideally a 'naive quantization also tried, here's how it broke' comparison — this single element is what made unsloth's DeepSeek post the template everyone still cites; (f) something that actually runs today via one command/script, since every sub-10-star repo found here had real numbers but no polish, and that's exactly why they stayed at single-digit stars despite working code. Note also: none of the existing robotics-quantization projects (regardless of quality) have ever reached Hacker News — that crossover has not happened yet in robotics, which is either a warning (the audience doesn't care) or the actual opportunity (first mover into HN/general-tech attention for this genre) — worth a decision from the owner before committing marketing effort either way.\\n\\n5. Tooling note for future streams: `gh search` (repos/code) hits GitHub's secondary abuse rate-limit almost immediately under parallel/rapid calls even though `gh api rate_limit` reports quota available — space search calls out with single sequential Bash invocations, not parallel batches, and prefer `gh api search/issues?q=repo:X+term` (counts against 'core' 5000/hr) over `gh search` where possible."
+      },
+      {
+        "stream": "eval-honesty",
+        "findings": [
+          {
+            "claim": "LIBERO is the de facto standard closed-loop benchmark for VLA quantization work and is the right primary choice for this protocol. It's used by every 2025-2026 VLA-quantization paper I read in full, and both openpi and NVIDIA ship pretrained LIBERO checkpoints to diff against (pi0.5: Spatial 98.8 / Object 98.2 / Goal 98.0 / LIBERO-10 92.4, avg 96.85%).",
+            "evidence": "github.com/Physical-Intelligence/openpi examples/libero/README.md (raw-fetched, results table); huggingface.co/nvidia/GR00T-N1.7-LIBERO (confirmed via HF API, createdAt 2026-03-17); arxiv 2602.03782 (QVLA), 2602.13710 (HBVLA), 2605.24011 (ActQuant) all benchmark on LIBERO/OpenVLA-OFT",
+            "confidence": "verified"
+          },
+          {
+            "claim": "Concrete, reproducible LIBERO eval protocol parameters (from openpi's actual eval script): num_trials_per_task=50, 4 suites (spatial/object/goal/10) x 10 tasks each = 500 episodes/suite, max_steps ranging 220 (spatial) to 520 (libero_10). LIBERO-10 is the long-horizon/hardest suite.",
+            "evidence": "raw.githubusercontent.com/Physical-Intelligence/openpi/main/examples/libero/main.py, lines with num_trials_per_task, task_suite_name, max_steps constants (directly grepped)",
+            "confidence": "verified"
+          },
+          {
+            "claim": "openpi's own hardware table states pi0 inference needs >8GB VRAM (example: RTX 4090); LoRA fine-tuning needs >22.5GB; full fine-tuning needs >70GB (A100/H100). This means baseline fp32/bf16 pi0 inference should fit comfortably within the 16GB RTX 5000 Ada laptop GPU, though the combined footprint of policy inference + MuJoCo/EGL sim rendering running simultaneously on the same 16GB card was not separately confirmed in any doc.",
+            "evidence": "github.com/Physical-Intelligence/openpi README hardware table (WebFetch-confirmed)",
+            "confidence": "likely"
+          },
+          {
+            "claim": "LIBERO's own install stack (Python 3.8.13, torch==1.11.0+cu113) genuinely conflicts with the modern JAX/torch stack used by openpi/GR00T/lerobot. openpi's documented fix is a Docker-based policy-server/eval-client split, git submodules, and X11/EGL-or-GLX forwarding for MuJoCo rendering — this is real, non-trivial install friction, not hypothetical.",
+            "evidence": "raw.githubusercontent.com/Physical-Intelligence/openpi/main/examples/libero/README.md (raw-fetched: '--extra-index-url .../cu113', 'git submodule update --init --recursive', docker compose + xhost instructions)",
+            "confidence": "verified"
+          },
+          {
+            "claim": "HuggingFace's own LeRobot team has published empirical evidence that validation/action loss (including MSE) does NOT correlate with real task success rate: on PushT, val loss rose 135% while success rate rose 55%; on Transfer Cube, val loss stayed flat while success rate rose 15%+. Their recommendation is sparse full success-rate evals, not loss-based model/checkpoint selection.",
+            "evidence": "huggingface.co/blog/m1b/validation-loss-robotics (WebFetch, direct quotes obtained)",
+            "confidence": "verified"
+          },
+          {
+            "claim": "The robotics community is actively skeptical of open-loop metrics as sufficient evidence, consistent with the above: lerobot issue #2853 ('Question about loss validation and VLA evaluation in LeRobot', opened Jan 2026, still OPEN with 16 comments as of this check) shows practitioners and maintainers converging on 'val loss doesn't ensure success rate' and recommending real/sim rollouts instead.",
+            "evidence": "github.com/huggingface/lerobot/issues/2853 (gh api, full body+comments read directly)",
+            "confidence": "verified"
+          },
+          {
+            "claim": "None of the three VLA-quantization papers I read in full text (QVLA 2602.03782, HBVLA 2602.13710, ActQuant 2605.24011) report open-loop action-MSE/L1 vs. fp32 teacher as their headline/reported metric. All three report closed-loop success rate as ground truth; loss-type signals (Hessian sensitivity, HSIC scores, Fisher gradients w.r.t. action loss) are used only as internal calibration/bit-allocation signals, never as published evidence of correctness.",
+            "evidence": "ar5iv.labs.arxiv.org/html/2602.03782, /2602.13710, /2605.24011 (direct full-text fetch and targeted quote extraction)",
+            "confidence": "verified"
+          },
+          {
+            "claim": "The VLA-quantization space is NOT an empty ecosystem as the brief hypothesizes — it is already fairly crowded. At least 7 papers from Sept 2025-June 2026 do PTQ/quantization-aware training on VLAs, several with success-rate numbers rivaling or exceeding what a hobbyist project could realistically produce: BitVLA (2506.07530), EaqVLA (2505.21567), SQAP-VLA (2509.09090), QVLA (2602.03782), HBVLA (2602.13710), DyQ-VLA (2603.07904), ActQuant (2605.24011). All confirmed real via direct arXiv metadata fetch (not summarizer-generated).",
+            "evidence": "curl of raw arxiv.org/abs/<id> citation_* meta tags for all 7 IDs, done directly via Bash (bypasses any LLM-summarization hallucination risk)",
+            "confidence": "verified"
+          },
+          {
+            "claim": "BitVLA is not just a paper — it's an actively maintained OSS repo (161 stars, 13 forks, 1 open issue, last push March 2026) with released HF weights (hongyuw/bitvla-*-bf16, confirmed live on HF API), doing almost exactly the 'shrink a VLA and release it' pitch in native 1.58-bit form, matching fp32 OpenVLA-OFT baseline performance with 11x memory reduction. This is the single most direct piece of prior art/competition to be aware of.",
+            "evidence": "gh api repos/ustcwhy/BitVLA (stars/forks/pushed_at); huggingface.co/api/models?search=bitvla (weights confirmed live)",
+            "confidence": "verified"
+          },
+          {
+            "claim": "Other quantization papers are weaker on practical usability: QVLA says 'Code will be released' in its abstract but the only matching GitHub repo found (ZhangJinghe-AI/qvla) has 0 stars/appears unpopulated; HBVLA's abstract/page had no discoverable code link; ActQuant describes a custom 'OmniModel.cpp' low-bit C/C++ runtime (analogous to llama.cpp) but no matching public repo was found under any close name variant. This suggests a real gap exists at the 'practical, maintained, easy-to-use tool' layer even though the research-paper layer is crowded.",
+            "evidence": "gh api search/repositories queries for 'OmniModel.cpp', 'omnimodel in:name', 'QVLA quantization VLA' — no matching maintained repo found for either OmniModel.cpp or a populated QVLA code release",
+            "confidence": "likely"
+          },
+          {
+            "claim": "Three independent 2026 papers (QVLA, HBVLA, ActQuant) converge on the same architectural finding: the action head / vision-language projector (the cross-modal-to-action interface) is the MOST quantization-sensitive component; the vision encoder is the MOST robust (redundant, high-dimensional input tolerates precision loss); the language backbone is intermediate. ActQuant's practical response is to explicitly keep the action head/projector at full/higher precision while quantizing the backbone aggressively.",
+            "evidence": "ar5iv.labs.arxiv.org/html/2602.03782 ('the projector and the action head exhibit the most acute sensitivity... precipitates a severe, often catastrophic, decline'); /2602.13710 ('the projector and action head demonstrate the highest sensitivity'); /2605.24011 ('keeping the projector and action head in full precision')",
+            "confidence": "verified"
+          },
+          {
+            "claim": "Fine/precise-positioning subtasks degrade far more than coarse tasks under aggressive quantization, and a single suite-averaged success-rate number hides this. HBVLA's own per-task SimplerEnv numbers for 1.08-bit-quantized CogAct: 'Place Apple' (precise placement) = 38.4% vs. 'Pick Coke' (coarse) = 86.7%, both folded into a 70.0% suite average.",
+            "evidence": "ar5iv.labs.arxiv.org/html/2602.13710, task-level breakdown extracted directly from full text",
+            "confidence": "verified"
+          },
+          {
+            "claim": "Quantization errors compound over closed-loop rollout horizon (both HBVLA and QVLA make this claim explicitly) — small per-step deviations get amplified by contact dynamics over a sequence of actions. This is the mechanistic reason open-loop per-step error underestimates real degradation, and implies an eval protocol should specifically stress-test the longest-horizon suite (LIBERO-10, max_steps=520) rather than relying only on the easiest suite (LIBERO-Spatial, max_steps=220).",
+            "evidence": "ar5iv full text of 2602.13710 and 2602.03782 (compounding-error language directly quoted); the LIBERO-10-as-stress-test protocol recommendation is my own synthesis, not literature-stated",
+            "confidence": "likely"
+          },
+          {
+            "claim": "No paper found states a formal/codified 'acceptable degradation' threshold for quantized VLAs, but empirically, naive LLM-derived PTQ (SmoothQuant/OmniQuant) transplanted onto VLAs at W4A4 costs 3.2-23.7 absolute percentage points of success rate (per QVLA's own comparison table), while VLA-aware methods hold degradation to ~0.5-5 points at 4-bit and report 90-99.5% relative retention even at 1-bit/ternary (HBVLA 92.2%/93.6%, ActQuant 90.1% at 2.5bpw, DyQ-VLA 99.5%, BitVLA 'matches' fp32, SQAP-VLA net +4.5%). A submission losing noticeably more than this at 4-bit would read as behind the current state of the art. Note: the 'acceptable bar' framing itself is my synthesis of these numbers, not a stated community standard.",
+            "evidence": "ar5iv.labs.arxiv.org/html/2602.03782 (SmoothQuant/OmniQuant/QVLA W4A4 comparison numbers); abstracts of 2602.13710, 2605.24011, 2603.07904, 2506.07530, 2509.09090 (retention percentages, arxiv-metadata-verified)",
+            "confidence": "likely"
+          },
+          {
+            "claim": "Re-verifying the brief's demand-signal issues turned up one important correction: lerobot issues #4117 and #4153 currently point to different, more recent issues ('GR00T processor stacks camera views before resize/crop...' opened Jul 23 2026, and 'VLA-JEPA default world-model loss leaks future frames...' opened Jul 26 2026) — NOT the 'Jetson deployment issues' the brief describes. GR00T #24 (min GPU requirement) is CLOSED, resolved via batch-size/--no-tune-visual workarounds, last activity Jul 2025 (~13 months stale). openpi #677 and GR00T #130 are still OPEN and active (#677: 10 comments, updated Oct 2025; #130: 13 comments, updated May 2026).",
+            "evidence": "gh api repos/huggingface/lerobot/issues/4117 and /4153 (title/state/updated_at fields, read directly); repos/NVIDIA/Isaac-GR00T/issues/24 and /130; repos/Physical-Intelligence/openpi/issues/677",
+            "confidence": "verified"
+          },
+          {
+            "claim": "NVIDIA's own Isaac-GR00T repo already ships official TensorRT/ONNX export plus dedicated deployment scripts for Jetson AGX Thor (JetPack 7.1), Jetson Orin (JetPack 6.2), and DGX Spark. This means 'get a VLA onto Jetson' is already an NVIDIA-supported path for GR00T specifically (fp16/TensorRT-optimized, not sub-4-bit weight-quantized) — reducing differentiation value of an unverifiable Jetson claim unless it goes meaningfully lower-precision than what NVIDIA ships, and the project has no physical Jetson to verify against locally anyway.",
+            "evidence": "github.com/NVIDIA/Isaac-GR00T scripts/deployment/README.md and install_deps.sh references (WebFetch-confirmed)",
+            "confidence": "verified"
+          },
+          {
+            "claim": "lerobot (HF) already ships native environment integrations for LIBERO, Meta-World, RoboCasa, RoboMimic, RobotWin, and VLABench (src/lerobot/envs/{libero,metaworld,robocasa,robomme,robotwin,vlabench}.py), so eval infrastructure for these benchmarks against pi0/SmolVLA/ACT policies trained via lerobot largely already exists and needn't be hand-rolled. Exact CLI usage and per-benchmark GPU needs were not independently confirmed beyond file existence.",
+            "evidence": "github.com/huggingface/lerobot/tree/main/src/lerobot/envs (directory listing WebFetch-confirmed)",
+            "confidence": "likely"
+          },
+          {
+            "claim": "Secondary sim-benchmark landscape: SimplerEnv needs an NVIDIA GPU ('ideally RTX'), SAPIEN/Vulkan renderer, CUDA 11.8-<13, is ManiSkill2-based, and has published baselines for RT-1/RT-1-X/Octo (no pi0/SmolVLA/GR00T official SimplerEnv baseline was found, though HBVLA benchmarks CogAct there). Meta-World is pip-installable and lightweight (used in SmolVLA's own reported results) but its GPU/rendering requirements could not be confirmed from its thin README. RoboCasa is heavier (365 tasks, 2500+ kitchen scenes, requires robosuite 'master' branch, documented numba/numpy version conflicts) and has its own third-party leaderboard (robocasa-benchmark/leaderboard, with a GR00T N1.5 submission dated 2026-05-19). ManiSkill3 requires Vulkan GPU rendering and its published baselines (Octo/RDT-1B/RT-X) don't include the three target policies. These 'no official baseline found' and 'requirements unconfirmed' points are absence-of-evidence, not proof of absence.",
+            "evidence": "github.com/simpler-env/SimplerEnv README; github.com/Farama-Foundation/Metaworld README (pip install metaworld, py3.10-3.13, Linux/macOS); github.com/robocasa/robocasa README (robosuite master, numba/numpy pain, 365 tasks); github.com/robocasa-benchmark/leaderboard (gr00t_n1.5_2026_05_19.json sample submission); maniskill.readthedocs.io installation page (Vulkan driver required, no VRAM figures)",
+            "confidence": "likely"
+          }
+        ],
+        "recommendation": "Build the evaluation protocol around LIBERO as the primary closed-loop benchmark, not open-loop MSE. Concretely: (1) First reproduce openpi's or lerobot's published fp32 baseline (e.g. pi0.5-LIBERO 96.85% avg, or SmolVLA's reported LIBERO/Meta-World numbers) on the RTX 5000 Ada 16GB rig exactly as released, before touching quantization — a self-run baseline that doesn't match the official number invalidates any later \"delta\" claim. (2) Run the full 4-suite LIBERO protocol (50 trials/task x 10 tasks/suite) using openpi's own eval script parameters, and specifically foreground LIBERO-10 (max_steps=520, the longest-horizon suite) as the compounding-error stress test — this is where the literature says quantization damage actually shows up, and where an easy suite like LIBERO-Spatial would hide it. (3) Report success rate as raw counts (e.g. 47/50) across ≥3 seeds, broken out PER-TASK, not just suite-averaged — HBVLA's own data shows a 38.4% vs 86.7% per-task split hiding inside one 70% average, so an averaged-only number will not survive skeptical review once someone asks for the breakdown. (4) Use action-MSE/L1 vs. the fp32 teacher only as a cheap, fast internal regression gate during development (it catches \"totally broken,\" nothing subtler) — never present it publicly as evidence of correctness; HuggingFace's own team has published data (their validation-loss-robotics blog) and an active community issue (lerobot #2853) explicitly rejecting loss/MSE as a success-rate proxy, so leading with that metric is a credibility liability, not an asset. (5) When designing/choosing a quantization scheme, protect the action head and vision-language projector at higher precision (fp16 minimum) and push aggressive low-bit quantization onto the vision encoder first, language backbone second — this is the one specific, well-evidenced, three-paper-independently-replicated design choice; ignoring it is the most likely way to ship an obviously-broken demo. (6) Do NOT claim to be first, or that this is an unexplored gap — it isn't: BitVLA alone is a real, actively-maintained, 161-star OSS repo with released weights doing native 1.58-bit VLA quantization matching fp32 OpenVLA-OFT. The differentiation that still looks open is the \"practical tooling\" layer (an easy pip-install / llama.cpp-style runtime + a rigorous, reproducible, multi-seed, per-task eval harness), not the underlying quantization science, which is now a crowded 2025-2026 arXiv space. (7) Do NOT make an unverified Jetson claim — there is no Jetson hardware locally, cloud ARM instances are not architecturally equivalent to Jetson's GPU, and NVIDIA already ships an official (fp16/TensorRT) GR00T-to-Jetson deployment path, so this claim is both hard to verify honestly and weakly differentiated even if made. (8) Treat Meta-World and/or SimplerEnv as secondary/cross-check benchmarks only if time permits (both have real install friction not fully characterized here — verify hands-on before promising them in any writeup); consider RoboCasa's existing third-party leaderboard as a later external-credibility step (submit a quantized entry for independent verification) rather than a dev-loop benchmark, given its heavier install/scale profile.",
+        "summary": "I verified, via direct primary-source reads (gh api, raw GitHub file fetches, HF API, and raw-arXiv-metadata curl calls that bypass any LLM-summarization risk), the four sub-questions on proving a quantized VLA still works. Key results: LIBERO is confirmed as the community-standard closed-loop benchmark with concrete, reproducible eval parameters (50 trials/task, 4 suites, max_steps 220-520) and official pi0.5/GR00T baselines to diff against; it fits comfortably within openpi's own stated >8GB inference VRAM bound on the 16GB laptop GPU, though real install friction (old LIBERO torch/cu113 stack vs. modern policy stacks, solved by openpi via Docker client-server split) is documented and genuine. Open-loop action-MSE/L1 is NOT trusted as sufficient evidence by the community — HuggingFace's own blog post and an active lerobot issue (#2853) present direct empirical evidence that validation loss/MSE does not correlate with success rate, and none of the three VLA-quantization papers I read in full (QVLA, HBVLA, ActQuant, all verified real via raw arXiv metadata) report open-loop error as their headline metric. Those same three papers converge independently on a specific, actionable failure-mode finding: the action head/projector is the most quantization-sensitive component (vision encoder most robust), and fine-positioning subtasks degrade far more than coarse ones even when hidden inside averaged success-rate numbers. A major correction to the brief: the VLA-quantization space is already crowded (7 papers, Sept 2025-June 2026), and BitVLA specifically is a real, actively-maintained 161-star OSS repo with released weights doing almost exactly the pitched idea — meaningfully changing the \"no ecosystem exists\" framing, though a practical/tooling gap (no OmniModel.cpp-style maintained runtime was found) still looks real. I could not fully verify Meta-World's and SimplerEnv's exact GPU/VRAM ceilings (thin docs) — flagged honestly as unverified/needing hands-on confirmation. I also caught that lerobot issues #4117/#4153, as currently numbered, do NOT show the \"Jetson deployment issues\" the brief describes — they're different, more recent issues — so that specific citation should not be reused without correction."
+      }
+    ]
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Scope"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "scope:pi0-openpi-state",
+      "phaseIndex": 1,
+      "phaseTitle": "Scope",
+      "agentId": "aac68fc66696cf4e3",
+      "model": "claude-sonnet-5",
+      "state": "done",
+      "startedAt": 1785768848102,
+      "queuedAt": 1785768848091,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "I verified openpi's (Physical-Intelligence/openpi, 13.1k st…",
+      "promptPreview": "GOAL: pick ONE high-value target for this project — \"take a genuinely useful model and make it run on cheap/consumer hardware, then publish it so people can actually use it.\" Inspiration: someone recently got Kimi-class LLMs running on CPU. The owner wants the robotics/VLA/VLM angle if it's viable.\n\nWHO IS DOING IT: an SF autonomous-vehicle perception engineer. Deep CUDA/TensorRT/inference-optimiz…",
+      "lastProgressAt": 1785769481504,
+      "tokens": 127297,
+      "toolCalls": 52,
+      "durationMs": 633402,
+      "resultPreview": "{\"summary\":\"I verified openpi's (Physical-Intelligence/openpi, 13.1k stars, Apache-2.0 code license) published memory requirements, pulled real architecture parameters from source (pi0.py/pi0_config.py/gemma.py/model.py), enumerated every OOM/quantization/Jetson/CPU issue and PR via gh search+api, checked huggingface/lerobot's native PyTorch pi0/pi0.5/pi0-FAST port for quantization support, confir…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "scope:other-vla-targets",
+      "phaseIndex": 1,
+      "phaseTitle": "Scope",
+      "agentId": "af7edcb6dac74e45e",
+      "model": "claude-sonnet-5",
+      "state": "done",
+      "startedAt": 1785768848103,
+      "queuedAt": 1785768848091,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Researched 6 alternative VLA targets plus new 2026 entrants…",
+      "promptPreview": "GOAL: pick ONE high-value target for this project — \"take a genuinely useful model and make it run on cheap/consumer hardware, then publish it so people can actually use it.\" Inspiration: someone recently got Kimi-class LLMs running on CPU. The owner wants the robotics/VLA/VLM angle if it's viable.\n\nWHO IS DOING IT: an SF autonomous-vehicle perception engineer. Deep CUDA/TensorRT/inference-optimiz…",
+      "lastProgressAt": 1785769405024,
+      "tokens": 105639,
+      "toolCalls": 68,
+      "durationMs": 556921,
+      "resultPreview": "{\"summary\":\"Researched 6 alternative VLA targets plus new 2026 entrants via gh api/search (GitHub) and huggingface.co API (no general web search available). Verified stars/downloads/license/issue signals for SmolVLA, OpenVLA/OpenVLA-OFT, NVIDIA GR00T N1.5/1.6/1.7, ACT/Diffusion Policy, RDT-1B, and Octo, plus MolmoAct2/X-VLA/RDT2-VQ/Xiaomi-Robotics-0 as new candidates. The single biggest finding, w…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "scope:quantization-toolchain",
+      "phaseIndex": 1,
+      "phaseTitle": "Scope",
+      "agentId": "a63b4621e5778a3ed",
+      "model": "claude-sonnet-5",
+      "state": "done",
+      "startedAt": 1785768848103,
+      "queuedAt": 1785768848091,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "I verified the brief's core premise is now false: a sophist…",
+      "promptPreview": "GOAL: pick ONE high-value target for this project — \"take a genuinely useful model and make it run on cheap/consumer hardware, then publish it so people can actually use it.\" Inspiration: someone recently got Kimi-class LLMs running on CPU. The owner wants the robotics/VLA/VLM angle if it's viable.\n\nWHO IS DOING IT: an SF autonomous-vehicle perception engineer. Deep CUDA/TensorRT/inference-optimiz…",
+      "lastProgressAt": 1785769274090,
+      "tokens": 88024,
+      "toolCalls": 39,
+      "durationMs": 425987,
+      "resultPreview": "{\"summary\":\"I verified the brief's core premise is now false: a sophisticated GGUF/llama.cpp-based VLA inference runtime called vla.cpp (VinRobotics, Apache-2.0, 129 stars, 25 forks, arXiv:2606.08094) already exists and covers essentially every model the brief names — SmolVLA, pi0, pi0.5, GR00T N1.5/1.6/1.7, OpenVLA-OFT, BitVLA, Evo-1, VLA-Adapter, VLA-JEPA — on CPU/CUDA/partial-Metal, LIBERO-veri…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "scope:community-hardware-demand",
+      "phaseIndex": 1,
+      "phaseTitle": "Scope",
+      "agentId": "a883abcdeec7e7586",
+      "model": "claude-sonnet-5",
+      "state": "done",
+      "startedAt": 1785768848104,
+      "queuedAt": 1785768848091,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "I quantified hardware pain in the robot-learning community …",
+      "promptPreview": "GOAL: pick ONE high-value target for this project — \"take a genuinely useful model and make it run on cheap/consumer hardware, then publish it so people can actually use it.\" Inspiration: someone recently got Kimi-class LLMs running on CPU. The owner wants the robotics/VLA/VLM angle if it's viable.\n\nWHO IS DOING IT: an SF autonomous-vehicle perception engineer. Deep CUDA/TensorRT/inference-optimiz…",
+      "lastProgressAt": 1785769422478,
+      "tokens": 139882,
+      "toolCalls": 39,
+      "durationMs": 574374,
+      "resultPreview": "{\"summary\":\"I quantified hardware pain in the robot-learning community via gh api (lerobot, openpi, Isaac-GR00T issue trackers, sorted/filtered by VRAM/OOM/jetson/orin/raspberry/mps keywords), read the merged official lerobot hardware_guide.mdx, and cross-checked the competitive landscape (existing OSS/commercial projects already attacking this problem) plus two independent public experiments that…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 5,
+      "label": "scope:prior-art-and-credit",
+      "phaseIndex": 1,
+      "phaseTitle": "Scope",
+      "agentId": "ae8787d9d6816d845",
+      "model": "claude-sonnet-5",
+      "state": "done",
+      "startedAt": 1785768848104,
+      "queuedAt": 1785768848091,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "I re-verified all 6 named demand-signal issues (still mostl…",
+      "promptPreview": "GOAL: pick ONE high-value target for this project — \"take a genuinely useful model and make it run on cheap/consumer hardware, then publish it so people can actually use it.\" Inspiration: someone recently got Kimi-class LLMs running on CPU. The owner wants the robotics/VLA/VLM angle if it's viable.\n\nWHO IS DOING IT: an SF autonomous-vehicle perception engineer. Deep CUDA/TensorRT/inference-optimiz…",
+      "lastProgressAt": 1785769569480,
+      "tokens": 99470,
+      "toolCalls": 68,
+      "durationMs": 721376,
+      "resultPreview": "{\"summary\":\"I re-verified all 6 named demand-signal issues (still mostly open/unresolved) and then ran a much wider prior-art sweep than the brief anticipated. Bottom line: the narrow claim \\\"no quantized/GGUF artifacts exist for pi0/OpenVLA/GR00T/SmolVLA on HF\\\" is TRUE and verified — every \\\"pi0 gguf\\\"/\\\"groot gguf\\\" hit on HF is a false-positive unrelated LLM coincidentally named pi0/GROOT. But…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 6,
+      "label": "scope:eval-honesty",
+      "phaseIndex": 1,
+      "phaseTitle": "Scope",
+      "agentId": "a75c3e67e771d0768",
+      "model": "claude-sonnet-5",
+      "state": "done",
+      "startedAt": 1785768848104,
+      "queuedAt": 1785768848091,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Build the evaluation protocol around LIBERO as the primary …",
+      "promptPreview": "GOAL: pick ONE high-value target for this project — \"take a genuinely useful model and make it run on cheap/consumer hardware, then publish it so people can actually use it.\" Inspiration: someone recently got Kimi-class LLMs running on CPU. The owner wants the robotics/VLA/VLM angle if it's viable.\n\nWHO IS DOING IT: an SF autonomous-vehicle perception engineer. Deep CUDA/TensorRT/inference-optimiz…",
+      "lastProgressAt": 1785769431187,
+      "tokens": 89899,
+      "toolCalls": 43,
+      "durationMs": 583083,
+      "resultPreview": "{\"findings\":[{\"claim\":\"LIBERO is the de facto standard closed-loop benchmark for VLA quantization work and is the right primary choice for this protocol. It's used by every 2025-2026 VLA-quantization paper I read in full, and both openpi and NVIDIA ship pretrained LIBERO checkpoints to diff against (pi0.5: Spatial 98.8 / Object 98.2 / Goal 98.0 / LIBERO-10 92.4, avg 96.85%).\",\"evidence\":\"github.co…"
+    }
+  ],
+  "totalTokens": 650211,
+  "totalToolCalls": 309
+}
