@@ -1,0 +1,39 @@
+{
+ "label": "fix-cpu-fp32",
+ "model": "openvla/openvla-7b-finetuned-libero-spatial",
+ "dtype": "fp32",
+ "device": "cpu",
+ "load_seconds": 6.03,
+ "weights_gb": 30.165,
+ "peak_vram_gb": null,
+ "peak_host_rss_gb": 31.209,
+ "latency_ms": {
+  "mean": 10498.32,
+  "p50": 10522.75,
+  "p90": 10596.9,
+  "p99": 10596.9,
+  "min": 10375.29,
+  "max": 10596.9,
+  "iters": 3.0
+ },
+ "control_hz": 0.1,
+ "fidelity": {},
+ "notes": [
+  "unnorm_key=libero_spatial; action dim=(7,)",
+  "peak VRAM reserved None GB",
+  "single-step action prediction (OpenVLA emits one action per forward)",
+  "real LIBERO frames",
+  "saved actions (4, 1, 7) -> ../results/actions/fix_cpu_fp32.npy"
+ ],
+ "env": {
+  "torch": "2.10.0+cu128",
+  "cuda_build": "12.8",
+  "python": "3.11.15",
+  "platform": "Linux-6.8.12-060812-generic-x86_64-with-glibc2.31",
+  "cpu_count": 32,
+  "gpu": "NVIDIA RTX 5000 Ada Generation Laptop GPU",
+  "gpu_total_gb": 16.82,
+  "compute_capability": "8.9",
+  "driver": "535.183.01"
+ }
+}

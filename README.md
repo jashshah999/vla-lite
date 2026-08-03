@@ -66,11 +66,14 @@ with ≤11 GB cards", open with zero replies since Oct 2025).
 `HuggingFaceVLA/libero` episode 0, greedy decoding, all three fixes applied.
 Fidelity is measured against the **bf16** run on byte-identical inputs.
 
-| config | peak VRAM | weights | p50 latency | p99 | action L1 vs bf16 | rel. err (÷ action σ) | cosine | gripper flips |
-|---|---|---|---|---|---|---|---|---|
-| bf16 | 15.29 GB | 15.08 GB | 260 ms | 263 ms | — (reference) | — | — | — |
-| int8 | 8.05 GB | 7.81 GB | 422 ms | 423 ms | 0.071 | 0.51 | 0.867 | 1 / 16 |
-| **nf4** | **4.60 GB** | **4.17 GB** | **245 ms** | 247 ms | 0.132 | 0.83 | 0.743 | 2 / 16 |
+| config | peak VRAM | host RAM | p50 latency | action L1 vs bf16 | rel. err (÷ action σ) | cosine | gripper flips |
+|---|---|---|---|---|---|---|---|
+| bf16 (GPU) | 15.29 GB | 1.8 GB | 260 ms | — (reference) | — | — | — |
+| int8 (GPU) | 8.05 GB | 2.3 GB | 422 ms | 0.071 | 0.51 | 0.867 | 1 / 16 |
+| **nf4 (GPU)** | **4.60 GB** | 2.4 GB | **245 ms** | 0.132 | 0.83 | 0.743 | 2 / 16 |
+| fp32 (**CPU only**) | none | 31.2 GB | 10,523 ms | **0.000** | 0.000 | 1.000 | 0 / 4 |
+
+The CPU row uses 4 frames (it takes ~10.5 s per action); the GPU rows use 16.
 
 Rig: RTX 5000 Ada Laptop (16.8 GB, compute 8.9), driver 535.183.01,
 torch 2.10.0+cu128, transformers 4.56.2, timm 0.9.16, bitsandbytes 0.50.0,
@@ -89,6 +92,20 @@ dequantizes per matmul. Weight-only quantization shrinks footprint; it does not
 make VLA inference fast. Anyone promising both is selling something. (bnb also
 warns that the fused vision hidden dim, 4304, is unaligned for its fast kernel
 and falls back to a slower path — a real optimization opportunity, untouched here.)
+
+**It runs with no GPU at all** — 31.2 GB of system RAM, no CUDA — but at
+10.5 s per action (0.1 Hz) it is not a controller. It *is* useful for debugging,
+CI, and offline evaluation on machines without a GPU.
+
+**Why fp32-on-CPU matches bf16-on-GPU exactly** (L1 = 0.000, cosine = 1.000,
+4/4 distinct actions, so this is not the degenerate case): OpenVLA discretizes
+each action dimension into 256 bins and decodes them as tokens. fp32-vs-bf16
+numerical differences are far too small to move an `argmax` across a bin
+boundary, so the *same* tokens come out. That is also the mechanism behind the
+quantization damage above — nf4 error *is* large enough to flip bins, and one
+flipped bin is a visible jump in the action, not a rounding error. It explains
+why a metric like "L1 = 0.13" understates the problem and why the gripper-flip
+count is the number to watch.
 
 **Quantization changes the policy's behaviour, and 4-bit changes it a lot.**
 A relative error of 0.83 means the average action deviates by ~83% of that action
@@ -114,8 +131,12 @@ you have 8 GB.
   placement, while the checkpoint is the `libero_spatial` finetune — a
   deliberately mild distribution mismatch, since the goal was to compare
   precisions on identical inputs, not to score the policy.
-- CPU-only inference is not reported: the fp32 CPU path needs a consistent-dtype
-  load and was still being fixed when these numbers were taken.
+- The CPU row is 4 frames, not 16, and fp32 CPU needed an explicit `.float()`
+  because the checkpoint config's `torch_dtype: bfloat16` does not always reach
+  the nested language model via the `dtype=` kwarg (it surfaces as
+  "expected m1 and m2 to have the same dtype").
+- nf4/int8 on CPU is not covered: bitsandbytes' low-bit kernels are CUDA-side,
+  so the CPU path here is full fp32 and needs 31 GB of RAM.
 
 ## Use it
 
