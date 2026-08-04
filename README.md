@@ -116,6 +116,66 @@ different behaviour at the moment that decides whether a grasp happens.
 int8 is roughly half as damaging on every metric and is the better default if
 you have 8 GB.
 
+## Prior art, and what is actually new here
+
+An adversarial novelty audit (3 agents, 111 verified lookups, notes in
+[`novelty-audit.json`](novelty-audit.json)) was run against this work. Most of it
+is **not** new, and the specifics matter:
+
+- **4-bit/8-bit OpenVLA is not new.** The OpenVLA paper itself
+  (arXiv:2406.09246, Table 2) quantized this exact model to int4/int8 and
+  reported VRAM alongside *real-robot success rates* — a more meaningful damage
+  measure than the action-space deltas here.
+- **The `_supports_sdpa` fix is not new.** It was already published in
+  `moojink/openvla-oft` issue #108, over a year before this work.
+- **A better quantization-damage study already exists.**
+  `github.com/parastoopil/openvla-1bit` does Hessian-guided 1-bit GPTQ/BiLLM with
+  gripper-specific error breakdowns, published before this.
+- **CPU-only OpenVLA is already a reference benchmark** in Tenstorrent's public
+  repo.
+- The fp32-CPU ≡ bf16-GPU byte-identical result is a clean check but a
+  *predictable* consequence of the paper's published 256-bin action
+  discretization, not a discovery.
+
+**The one item with no prior report: the silent vision bypass.** The audit
+searched every openvla/openvla issue and PR (all states), every HuggingFace
+discussion on openvla-7b and its four LIBERO checkpoints, ~30 forks'
+`modeling_prismatic.py`, HN and arXiv, and found nothing describing this failure
+mode. The closest are issue #148 ("Cached Generation vs Multimodal Forward",
+closed with zero replies — it points at the exact code region but frames it as a
+design question) and #62 (constant actions after fine-tuning, attributed to
+training data). No fork has patched it.
+
+It is worth being clear about the genre, though: silent breakage of custom
+multimodal `generate()`/cache handling across transformers upgrades has hit
+Florence2, DeepSeek-OCR and MiMo-Audio too. An ML infra engineer would recognize
+the *family* instantly. This is a useful unreported bug in a widely-used
+checkpoint, not a new idea.
+
+### The mechanism, corrected
+
+The audit challenged my original explanation on the grounds that
+`_prepare_cache_for_generation` only injects an empty `DynamicCache` when
+`_supports_cache_class` is True, which OpenVLA never sets. That reading is
+correct about the attribute (verified: `_supports_cache_class = ABSENT`) but the
+conclusion does not hold on transformers 4.56.2. Measured on the **official**
+load path (`AutoModelForVision2Seq` + `trust_remote_code=True`, with only the
+unavoidable `_supports_sdpa` patch, and transformers' own auto-injected
+`GenerationMixin` confirmed present in the MRO):
+
+- black, white and noise images all yield the identical action
+  `[0.096, 0.1071, -0.0027, -0.0016, -0.015, -0.0193, 0.0]`
+- `vision_backbone` forward hook: **0 calls**. `projector`: **0 calls**.
+- the language model receives `input_ids` of shape **(1, 1) on all 7 steps**,
+  including the first
+
+The prompt is therefore sliced on step 0. That slice occurs in exactly one place
+in the checkpoint's code, gated on `past_key_values is not None` — so
+`past_key_values` *was* non-None on the first call under 4.56.2, whatever the
+gating logic reads like in other versions. The bug is real on the official path
+and is not an artifact of custom loading; I verified that specifically, because my
+first implementation bypassed the Auto path and could have caused it.
+
 ## Honest limitations
 
 - **No closed-loop success rate.** These are open-loop action deltas on 16 frames

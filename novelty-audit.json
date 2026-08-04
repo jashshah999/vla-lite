@@ -1,0 +1,212 @@
+{
+  "summary": "Adversarially test whether the OpenVLA silent-vision-bypass finding and the FEC-at-control-rates finding are actually novel",
+  "agentCount": 3,
+  "logs": [
+    "3/3 novelty checks done"
+  ],
+  "result": {
+    "checks": [
+      {
+        "verdict": "already-known-refuted",
+        "evidence": [
+          {
+            "finding": "openvla/openvla issues (all states, gh api + gh search, keywords: constant action, same action, identical output, ignores image, vision not used, blind, transformers version, DynamicCache, past_key_values, prepare_inputs_for_generation, cache, generate, prompt truncation, 4.40, 4.50): zero issues describe this exact mechanism. Closest are #62 'Issue with Repeating Model Output After Fine-Tuning' (closed 2024-08-22, symptom matches 'identical action' but maintainers attributed it to bad/duplicated training data or action-chunking, never diagnosed a transformers-version cache bug) and #148 'Cached Generation vs Multimodal Forward' (closed 2024-11-01 with zero replies) which points at the exact code region — the reporter noticed that the cached-generation forward call does not pass multimodal_embeddings — but frames it as a design question, not a version-triggered failure, and gets no answer. #266 and #313 are generic transformers-version/forward-vs-generate questions with no bug diagnosis.",
+            "source": "gh api repos/openvla/openvla/issues (state=all) and gh search issues --repo openvla/openvla, issues #62, #148, #266, #313"
+          },
+          {
+            "finding": "HuggingFace openvla/openvla-7b has 7 discussion threads total (none about this), plus the 4 LIBERO-finetuned repos each have exactly 1 discussion (all just model-card edits, one unrelated to a 'GoBA' backdoor-attack paper). PR discussion #5 on openvla-7b ('Update modeling_prismatic.py to account for the case where input_ids is None') touches the same forward()/generation code but fixes a different edge case (missing input_ids null-check), not the Cache-vs-None issue, and remains open/unmerged.",
+            "source": "huggingface.co/api/models/openvla/openvla-7b/discussions and discussions/5; huggingface.co/api/models/openvla/openvla-7b-finetuned-libero-{spatial,object,goal,10}/discussions"
+          },
+          {
+            "finding": "The vulnerable line `if past_key_values is not None: input_ids = input_ids[:, -1:]` in prepare_inputs_for_generation, and the matching `if input_ids.shape[1] == 1 and past_key_values is not None` branch in forward(), is copy-pasted verbatim, unpatched, across every fork/derivative found via GitHub code search (TRI-ML/prismatic-vlms — the upstream base — OpenDriveLab/RoboDual, PKU-HMI-Lab/Hybrid-VLA, umd-huang-lab/tracevla, and ~25 others). No fork rewrites this check for Cache-object semantics (e.g. via get_seq_length()), i.e. nobody has silently fixed it either.",
+            "source": "gh api search/code?q=prepare_inputs_for_generation+prismatic and per-repo greps of prismatic.py in TRI-ML/prismatic-vlms, OpenDriveLab/RoboDual, PKU-HMI-Lab/Hybrid-VLA, umd-huang-lab/tracevla"
+          },
+          {
+            "finding": "moojink/openvla-oft — the dominant successor fork — never calls .generate() for action prediction at all. Its predict_action() always does a single forward pass with past_key_values=None explicitly (parallel/regression or diffusion decoding), so it structurally never enters the autoregressive cached-generation code path the claim is about. This is an unrelated architectural choice (throughput), not a diagnosed fix for this bug; it also pins its own transformers fork (moojink/transformers-openvla-oft, forked for bidirectional attention) rather than stock transformers.",
+            "source": "raw.githubusercontent.com/moojink/openvla-oft/main/prismatic/extern/hf/modeling_prismatic.py (predict_action, _run_diffusion_prediction, _regression_or_discrete_prediction) and moojink/openvla-oft pyproject.toml"
+          },
+          {
+            "finding": "Direct inspection of transformers generation/utils.py across v4.40.1, v4.41.0, v4.44.0, v4.46.0, v4.48.0, v4.50.0 and current main shows the claimed mechanism does not fire for OpenVLA. `_prepare_cache_for_generation()` only writes an empty `DynamicCache()` into model_kwargs before step 0 if `self._supports_default_dynamic_cache()` is True, which requires the class attribute `_supports_cache_class = True`. OpenVLA's PrismaticPreTrainedModel/PrismaticForConditionalGeneration/OpenVLAForActionPrediction never set this attribute, so they inherit PreTrainedModel's default `_supports_cache_class = False` and hit 'Quick escape route 3' (`if not self._supports_default_dynamic_cache(): return`), which has existed continuously since at least v4.41-4.44. Net effect: on the very first prepare_inputs_for_generation call, past_key_values is simply absent from model_kwargs, so the function parameter falls back to its declared default of None -- exactly the pre-4.36 behavior -- and the multimodal branch (which consumes pixel_values) runs normally.",
+            "source": "raw.githubusercontent.com/huggingface/transformers/v4.40.1,v4.41.0,v4.44.0,v4.46.0,v4.48.0,v4.50.0,main/src/transformers/generation/utils.py (_prepare_cache_for_generation, _supports_default_dynamic_cache)"
+          },
+          {
+            "finding": "Separately, from v4.50 onward PreTrainedModel stops inheriting GenerationMixin, which would ordinarily make .generate() disappear entirely for OpenVLA's classes (they only inherit PreTrainedModel, not GenerationMixin) -- a loud AttributeError, not a silent bug. But transformers explicitly guards against this for trust_remote_code models loaded via an Auto class (exactly how OpenVLA's own README loads it, via AutoModelForVision2Seq.from_pretrained(..., trust_remote_code=True)): dynamic_module_utils.py's add_generation_mixin_to_remote_model() detects a custom class with prepare_inputs_for_generation but no explicit GenerationMixin base and dynamically re-injects it, preserving .generate() with the same _supports_cache_class=False behavior described above.",
+            "source": "raw.githubusercontent.com/huggingface/transformers/main/src/transformers/dynamic_module_utils.py (add_generation_mixin_to_remote_model) and modeling_utils.py (can_generate warning text naming v4.50)"
+          },
+          {
+            "finding": "openvla/openvla pins transformers==4.40.1 in setup.py, pyproject.toml and requirements-min.txt -- the officially supported version, well below the range the claim describes -- so a user following the repo's own install instructions is never exposed to whatever residual risk exists on later versions.",
+            "source": "raw.githubusercontent.com/openvla/openvla/main/pyproject.toml and requirements-min.txt"
+          }
+        ],
+        "closest_prior_art": "github.com/openvla/openvla issue #148 'Cached Generation vs Multimodal Forward' (closed 2024-11-01, https://github.com/openvla/openvla/issues/148) is the closest match -- it identifies the exact code region (the cached-generation forward() branch that skips multimodal_embeddings) that the claim's mechanism hinges on, but frames it as a design question about why that branch exists at all, gets zero replies, and never connects it to a transformers-version/Cache-object regression. Issue #62 'Issue with Repeating Model Output After Fine-Tuning' (closed 2024-08-22) is the closest phenomenological match to the claimed symptom (constant/identical actions) but was attributed to training-data or action-chunking causes, not this mechanism. No issue, PR, HF discussion, or fork anywhere diagnoses 'transformers>=4.50 silently truncates the prompt via an empty DynamicCache.'",
+        "honest_assessment": "Two separate questions, and they point the same way. (1) Has anyone already reported this exact bug? No -- exhaustive search of every openvla/openvla issue and PR (all states), every HF discussion on openvla-7b and its four LIBERO-finetuned checkpoints, ~30 GitHub forks' modeling_prismatic.py files, HN, and arXiv turns up nothing that names this mechanism. (2) Is the mechanism actually correct? Based on directly reading transformers' generation/utils.py and dynamic_module_utils.py across seven versions (4.40.1 through current main), the answer appears to be no. Transformers has an explicit, purpose-built escape hatch (`_supports_cache_class`, checked in `_prepare_cache_for_generation`'s 'Quick escape route 3') that has existed continuously since the Cache-class migration began (~v4.41-4.44) specifically so that legacy/custom models which never opted into the new Cache API keep getting `past_key_values=None` on their first generate() call, not an empty DynamicCache. OpenVLA's custom code never sets `_supports_cache_class = True`, so it rides this escape hatch on every version I checked, including 4.50.0 and main. Separately, the v4.50 removal of GenerationMixin from PreTrainedModel -- which would otherwise break .generate() outright for OpenVLA with a loud AttributeError -- is also explicitly guarded for exactly this trust_remote_code+Auto-class scenario via `add_generation_mixin_to_remote_model`. So the claim isn't just unreported, it looks like a plausible-sounding but incorrect diagnosis: it describes a real, well-known class of transformers migration hazard (custom/trust_remote_code models and the Cache-object transition -- this part is extensively documented in transformers' own code comments and deprecation warnings) but attaches it to a specific instance and code path that transformers was deliberately hardened against years before v4.50. An expert who traced the actual generation/utils.py logic would say 'no, that specific failure mode doesn't fire here, and here's the exact guard clause that prevents it' rather than being impressed. I could not run the actual model (no GPU/torch in this sandbox) to empirically confirm end-to-end, so I can't rule out some other version, attention backend, or serving-wrapper interaction producing a related-but-different silent failure -- but the specific causal chain in the claim (empty DynamicCache at step 0 -> prepare_inputs_for_generation truncates to 1 token -> forward() takes the cached-generation branch -> pixel_values never consumed) is directly contradicted by the guard clause that gates exactly that DynamicCache initialization on an attribute OpenVLA's classes never set."
+      },
+      {
+        "verdict": "partially-known",
+        "evidence": [
+          {
+            "source": "IEC 62439-3 (PRP/HSR), via Wikipedia summary of the standard",
+            "finding": "PRP and HSR duplicate every frame over two independent, disjoint network paths specifically to get 'zero-time recovery' for 'applications that request high availability and short switchover time' — the standard's own rationale is explicitly that retransmission/coded reconstruction is too slow, so duplication is used instead to add no repair latency. This is IEC 62439-3, standardized since ~2010, aimed at industrial control networks (substations, process control)."
+          },
+          {
+            "source": "IEEE 802.1CB-2017, Frame Replication and Elimination for Reliability (FRER), via Wikipedia/TSN summary",
+            "finding": "FRER 'sends duplicate copies of each frame over multiple disjoint paths to provide proactive seamless redundancy for control applications that cannot tolerate packet losses.' This is literally 'packet duplication over two paths' standardized in 2017, targeted explicitly at real-time control applications (TSN), not general data."
+          },
+          {
+            "source": "RFC 8627 (FlexFEC RTP payload format, IETF, 2019), Section 8 'Congestion Control Considerations'",
+            "finding": "The RFC itself documents the exact failure mode in the claim: 'FEC would not be beneficial [if] ... the application has a smaller latency requirement than the repair window adopted by the FEC configuration based on the expected burst loss duration and the target FEC overhead.' This is the block/repair-window-vs-latency-budget mechanism in the claim, stated as known/expected in a widely deployed WebRTC FEC standard, not something requiring new measurement to discover."
+          },
+          {
+            "source": "arXiv 1609.00424, 'Multi-Path Low Delay Network Codes' (Karzand/Draper et al.)",
+            "finding": "Directly studies FEC-coded multi-path streaming under delay constraints and concludes 'the delay penalty of communicating over multiple paths is insignificant when considering the potential throughput gains' — i.e., spreading/duplicating across paths costs ~0 extra delay, the same qualitative claim, formalized with a queueing+coding analysis a decade ago."
+          },
+          {
+            "source": "arXiv 1509.00167, 'FEC for Lower In-Order Delivery Delay in Packet Networks'",
+            "finding": "Establishes the formal throughput-vs-in-order-delivery-delay trade-off for block vs. streaming FEC codes, i.e. the 'block span (k/rate) plus interleave delay' cost model in the claim is exactly the object of a mature 'streaming codes' subfield (Martinian & Trott 2007 onward; ~20 arXiv papers found in one query: rate-optimal streaming codes, DE-SCo, layered low-delay codes, etc.), not a novel cost model."
+          },
+          {
+            "source": "arXiv 2503.21407, 'Age of Information in Short Packet Multi-Connectivity Links'",
+            "finding": "AoI literature already formally compares packet duplication, multiplexing, and joint (FEC-like) coding across multiple channels for freshness-optimal delivery, deriving closed-form AoI expressions and showing which scheme wins under which channel conditions — i.e., 'freshness beats reliability, and here is exactly when duplication vs. coding wins' is already a rigorous, if narrow, academic result, not an untouched question."
+          },
+          {
+            "source": "arXiv 2410.05852, 'A3L-FEC: Age-Aware Application Layer Forward Error Correction Flow Control'",
+            "finding": "A 2024 paper building an age-aware FEC controller precisely because naive block FEC causes 'Age Violations' — independent confirmation that the FEC-vs-freshness tension in the claim is an active, named research problem, not an unrecognized one."
+          },
+          {
+            "source": "GitHub search (gh search issues/repos/code) for 'FEC teleop', '802.1CB FRER', 'PRP HSR redundancy', 'multipath duplicate packet latency', 'robot control 100Hz FEC'",
+            "finding": "No GitHub or ROS Discourse thread was found doing the specific measurement (100Hz control stream, 265ms RTT, block FEC vs 2-path duplication) — only tangential hits (FRER protocol implementations like EricssonResearch/xdpfrer, an OMNeT++ 802.1CB model, and an unrelated authorization-gateway benchmark). This part of the search came back empty, which is the strongest candidate spot where genuine novelty could live."
+          }
+        ],
+        "closest_prior_art": "IEEE 802.1CB (FRER, 2017) and IEC 62439-3 (PRP/HSR, ~2010) are the closest prior art for the load-bearing engineering conclusion ('duplicate over two paths, don't wait for repair'): both standards duplicate every frame/packet over two disjoint paths specifically for zero-added-latency reliability in control applications, with FRER's own description naming 'control applications that cannot tolerate packet losses' as the target use case. RFC 8627 (FlexFEC) independently documents the mirror-image half of the claim (block FEC is useless once repair-window > app latency budget) as a known caveat in its own spec text. These are not approximate analogies — they are the identical mechanism and the identical stated rationale, just not evaluated at exactly 100 Hz / 265 ms RTT.",
+        "honest_assessment": "The qualitative finding — 'block FEC's repair-window latency makes it unsuitable for a tight real-time control deadline, so duplication over independent paths (which adds ~0 repair latency) wins' — is not new. It is the explicit design rationale of two deployed IEC/IEEE standards (PRP/HSR and 802.1CB FRER) built for exactly this purpose in industrial control networks, it's called out as a known limitation inside RFC 8627 itself, and it is formally derived (with closed-form delay/throughput trade-offs) in a two-decade-old 'streaming codes' information-theory literature plus a growing Age-of-Information literature that directly compares duplication vs. coding across paths. An expert in networked control, real-time media transport, or industrial Ethernet would say 'yes, obviously — that's why FRER/PRP exist' rather than be surprised. What is NOT already nailed down anywhere I could find is the specific empirical data point: a measured comparison at 100 Hz control-loop rate over a 265 ms RTT path, with concrete numbers for a specific block-FEC configuration versus 2-path duplication in a robot teleoperation context. That narrow empirical instantiation could be legitimately new as a measurement, but the underlying claim and its causal mechanism are standard, textbook-adjacent knowledge already codified in shipping standards — so I would classify the general claim as refuted-as-novel and only the specific numeric benchmark as possibly original (and even that is an unsurprising confirmation of standardized practice, not a new result)."
+      },
+      {
+        "verdict": "partially-known",
+        "evidence": [
+          {
+            "source": "OpenVLA paper (arXiv:2406.09246v3), Section 5.4 / Table 2",
+            "finding": "The original authors already quantized OpenVLA-7B to int8 and int4 and reported memory + real-robot-rollout success rate: bf16=16.8GB/71.3% success, int8=10.2GB/58.1%, int4=7.0GB/71.9% success (80 rollouts, 8 BridgeData V2 tasks). This is a more rigorous version of Project A's 'quantize to 4-bit and measure damage' claim, done in 2024 by the model's own creators using physical robot outcomes rather than cosine similarity."
+          },
+          {
+            "source": "github.com/moojink/openvla-oft issue #108 (closed 2025-08-21), filed by the OpenVLA paper's own first author's fork",
+            "finding": "Documents the exact fix for the _supports_sdpa incompatibility: '_supports_sdpa = False should be added' in modeling_prismatic.py for transformers 4.55.1 / peft 0.17.0 — the identical root cause and identical one-line fix Project A claims to have found independently, published roughly a year prior by someone directly downstream of the original authors."
+          },
+          {
+            "source": "github.com/parastoopil/openvla-1bit (created 2026-06-18, updated 2026-07-07)",
+            "finding": "An existing, more sophisticated public study of OpenVLA quantization damage: GPTQ+BiLLM Hessian-guided 1-bit/4-bit mixed quantization, reporting gripper-specific L1 error and cosine similarity across multiple calibration strategies (e.g. cosine 0.825-1.000, gripper L1 0.118-0.552 depending on calibration set). This directly overlaps and exceeds Project A's single nf4 cosine-0.743/2-of-16-flips data point, and predates it by weeks."
+          },
+          {
+            "source": "github.com/pytorch/ao issue #3236 (2025-10-24) and openvla/openvla issues #286, #287 (2025-12 to 2026-02)",
+            "finding": "Multiple independent parties were already quantizing OpenVLA-7B to 4-bit and hitting/reporting bugs (bitsandbytes .to() errors, torchao GemliteUIntX slowdowns) well before this session — confirms 4-bit OpenVLA is a well-trodden, actively-worked path, not a novel target."
+          },
+          {
+            "source": "github.com/tenstorrent/tt-metal, models/experimental/openvla/references/run_pytorch_openvla.py",
+            "finding": "Tenstorrent already ships a reference CPU (device='cpu') PyTorch benchmark script for OpenVLA as part of their hardware-porting effort, i.e. CPU-only OpenVLA inference and benchmarking already exists elsewhere as a reference point."
+          },
+          {
+            "source": "github.com/huggingface/transformers issues #41622, #39974; and issues on kijai/ComfyUI-Florence2, deepseek-ai/DeepSeek-OCR, XiaomiMiMo/MiMo-Audio, etc.",
+            "finding": "'_supports_sdpa missing' and 'GenerationMixin not inherited / ImportError' are an extremely common, well-documented bug class across dozens of custom-remote-code HF multimodal models whenever transformers ships a breaking release — the general failure pattern and fix (add the attribute / explicitly inherit GenerationMixin) is thoroughly known; applying it to OpenVLA specifically is a mechanical reapplication, not a new technique."
+          },
+          {
+            "source": "GitHub code/issue search for 'silent vision bypass' / cache_position slicing bug specific to OpenVLA modeling_prismatic.py",
+            "finding": "Could not find a prior report of the exact 'empty-cache prompt slicing silently drops vision tokens' bug for OpenVLA specifically — this narrow instance appears to not have a public prior report, though it is a specific case of the broader well-known 'custom multimodal generate()/cache handling silently breaks across transformers versions' bug family seen on many other VLMs."
+          },
+          {
+            "source": "github.com/naia-lib/naia README (game networking library)",
+            "finding": "Ships a built-in channel type 'SequencedUnreliable' explicitly documented as 'Newest-wins... Position updates (drop stale)' — i.e. the exact 'freshness-first, newest-wins UDP' semantics Project B presents, already a standard, named, shipped primitive in game netcode libraries (also present in sozu-proxy's UDP flow manager, and structurally identical to DDS/ROS2 QoS BEST_EFFORT+KEEP_LAST(1))."
+          },
+          {
+            "source": "3GPP 5G URLLC literature, e.g. arXiv survey 'Packet Duplication in Dual Connectivity Enabled 5G Wireless Networks'; SMPTE ST 2022-7 'Seamless Protection Switching' broadcast standard",
+            "finding": "Dual-path packet duplication as a deliberate substitute for FEC/retransmission under tight latency budgets is a standardized industry technique in both cellular URLLC (3GPP PDCP packet duplication) and broadcast video (SMPTE 2022-7 hitless dual-path protection) precisely because block FEC's repair latency structurally cannot meet tight real-time deadlines — the exact phenomenon Project B 'discovered' (FEC repaired 0 commands in 60ms, duplication won) is the textbook reason these standards exist."
+          },
+          {
+            "source": "github.com/mda590/cloudping.co, n0madic/cloudping, c1982/cloudping, VarunAgw/CloudPingTest, and ~10 similar repos, all active/updated through 2026",
+            "finding": "Measuring AWS cross-region RTT/jitter (including exactly ap-south-1/Mumbai from various source regions) is a long-standing commodity category with many existing public tools and dashboards; CA<->Mumbai RTT in the ~230-280ms range is already common public knowledge, not a new measurement."
+          },
+          {
+            "source": "teleop-link/README.md itself, 'Three findings that outrank everything above' and 'competitive read' sections",
+            "finding": "The project's own documentation already concedes: 'the needed primitives all exist already - QUIC datagrams (RFC 9221), multipath QUIC, MoQ drafts, RaptorQ (RFC 6330)... The gap is not a new wire protocol,' and separately identifies that camera/capture latency and AWS region choice dominate over any protocol engineering in this repo — i.e. the authors have already largely performed and accepted this same novelty audit against themselves."
+          },
+          {
+            "source": "github.com/VinRobotics/vla.cpp (created 2026-08-01) and github.com/flashrt-project/FlashRT (active through 2026-08-04)",
+            "finding": "Confirms the 'edge-VLA inference runtime' space is actively occupied right now by other real, current projects (vla.cpp = general VLA inference runtime; FlashRT = production low-latency VLA control for Pi0/Pi0.5/GR00T-N1.6/Pi0-FAST). Neither targets OpenVLA's specific transformers-compat shims, so they don't directly refute that one narrow piece, but they do show the broader goal ('make VLA inference lean and deployable') is a crowded, live field, not a gap Project A discovered."
+          }
+        ],
+        "closest_prior_art": "Project A: the OpenVLA paper itself (arXiv:2406.09246, Table 2) already quantized this exact model to int4/int8 and reported VRAM + real-robot success-rate damage, and the paper's own first author's follow-up repo (moojink/openvla-oft, issue #108) already documents the exact _supports_sdpa fix Project A presents as a discovery. github.com/parastoopil/openvla-1bit is a closer, more rigorous prior instance of 'measure OpenVLA quantization damage via cosine similarity and gripper error' than Project A's own experiment, published weeks earlier. Project B: no single closest match, but the assembled claim decomposes into several already-standard things — naia-lib's 'SequencedUnreliable' (newest-wins UDP), WireGuard-style HMAC+replay-window authentication, 3GPP 5G URLLC 'packet duplication' and SMPTE ST 2022-7 dual-path protection switching (duplication beats FEC under tight latency budgets), and commodity tools like cloudping.co (AWS cross-region RTT measurement). The README's own 'competitive read' section names Zenoh, QUIC datagrams, multipath QUIC, and RaptorQ as the pre-existing primitive set and states outright that assembling them, not inventing a new protocol, is the actual contribution.",
+        "honest_assessment": "Mostly not new. Project A is, almost line for line, a repeat of things already done: the OpenVLA paper's own authors quantized this exact model to int4 and measured the damage on real robot rollouts two years ago (more rigorously than a single cosine-similarity number); the specific _supports_sdpa fix Project A treats as a finding was already published by the paper's own first-author fork over a year before this session; CPU-only OpenVLA inference is already a reference benchmark in Tenstorrent's public repo; and a more sophisticated OpenVLA quantization-damage study (Hessian-guided 1-bit GPTQ/BiLLM with gripper-specific error breakdowns) already existed on GitHub before this work started. The one plausibly new item is the specific 'empty-cache prompt slicing silently drops vision tokens' bug — I could not find a prior report of that exact failure mode for OpenVLA — but it's a specific instance of an extremely common bug family (custom multimodal generate()/cache-handling breaking silently across transformers upgrades) that has bitten Florence2, DeepSeek-OCR, MiMo-Audio and others repeatedly; an ML infra engineer would recognize the genre instantly even if this exact instance is undocumented. The fp32-CPU/bf16-GPU byte-identical result is a correct and clean empirical check, but it's a predictable consequence of the paper's own published 256-bin action discretization, not a discovery. Project B is honest, careful systems engineering that mostly re-validates decades-old and industry-standard results in a new but adjacent domain: newest-wins/freshness-first UDP is a named, shipped primitive in game-netcode libraries and DDS/ROS2 QoS; deadman timeouts are universal in teleop safety systems; HMAC+replay-window authentication is literally WireGuard's core mechanism; TCP head-of-line-blocking causing catastrophic tail latency under loss is one of the best-documented phenomena in networking (it's why QUIC exists); and 'FEC can't meet tight real-time deadlines so duplicate across independent paths instead' is standardized doctrine in both 5G URLLC (3GPP packet duplication) and broadcast video (SMPTE ST 2022-7). Measuring cloud RTT between AWS regions is a commodity activity with many existing dashboards. What is genuinely well done, and worth crediting, is the rigor and honesty of the measurement: real authenticated UDP sockets (not just simulation) validated at true ~262ms intercontinental RTT, catching and correcting two of their own measurement bugs (the 310ms teardown-transient artifact and the delivery_fraction sequence-number bug) rather than reporting flattering-but-wrong numbers. That is good empirical practice, and the negative result on FEC is useful precisely because most people assume FEC helps and it's now measured, not assumed, for this workload. But it is validation and honest negative-results engineering, not new mechanism — and the project's own README already says as much in its 'competitive read' section, naming the exact existing primitives (QUIC datagrams, multipath QUIC, RaptorQ, Zenoh) and stating the gap is assembly-and-validation, not invention. An expert in either VLA quantization or real-time networking would say 'yes, obviously' to nearly every individual claim, while acknowledging the combined measurement effort across both projects reflects unusually careful, self-skeptical engineering — which is a real virtue, just not the same thing as novelty."
+      }
+    ]
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Refute"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "refute:openvla-bug",
+      "phaseIndex": 1,
+      "phaseTitle": "Refute",
+      "agentId": "a84f16ec8b37e9197",
+      "model": "claude-sonnet-5",
+      "state": "done",
+      "startedAt": 1785826488307,
+      "queuedAt": 1785826488296,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "already-known-refuted",
+      "promptPreview": "You are running an ADVERSARIAL NOVELTY AUDIT. Your job is to REFUTE claims of novelty, not confirm them. Default to \"this is already known\" and make the claimant prove otherwise. A well-evidenced refutation is the most valuable result you can return.\n\nTOOL NOTES: general search engines (Google/Bing/DDG/Brave/Mojeek/SearXNG) are ALL bot-walled here; WebSearch budget is exhausted — do NOT call it. W…",
+      "lastProgressAt": 1785827031568,
+      "tokens": 105586,
+      "toolCalls": 55,
+      "durationMs": 543260,
+      "resultPreview": "{\"verdict\":\"already-known-refuted\",\"evidence\":[{\"finding\":\"openvla/openvla issues (all states, gh api + gh search, keywords: constant action, same action, identical output, ignores image, vision not used, blind, transformers version, DynamicCache, past_key_values, prepare_inputs_for_generation, cache, generate, prompt truncation, 4.40, 4.50): zero issues describe this exact mechanism. Closest are …"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "refute:fec-control-rates",
+      "phaseIndex": 1,
+      "phaseTitle": "Refute",
+      "agentId": "ab979db3260adaaf0",
+      "model": "claude-sonnet-5",
+      "state": "done",
+      "startedAt": 1785826488308,
+      "queuedAt": 1785826488296,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "partially-known",
+      "promptPreview": "You are running an ADVERSARIAL NOVELTY AUDIT. Your job is to REFUTE claims of novelty, not confirm them. Default to \"this is already known\" and make the claimant prove otherwise. A well-evidenced refutation is the most valuable result you can return.\n\nTOOL NOTES: general search engines (Google/Bing/DDG/Brave/Mojeek/SearXNG) are ALL bot-walled here; WebSearch budget is exhausted — do NOT call it. W…",
+      "lastProgressAt": 1785826766153,
+      "tokens": 48915,
+      "toolCalls": 33,
+      "durationMs": 277845,
+      "resultPreview": "{\"verdict\":\"partially-known\",\"evidence\":[{\"source\":\"IEC 62439-3 (PRP/HSR), via Wikipedia summary of the standard\",\"finding\":\"PRP and HSR duplicate every frame over two independent, disjoint network paths specifically to get 'zero-time recovery' for 'applications that request high availability and short switchover time' — the standard's own rationale is explicitly that retransmission/coded reconstr…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "refute:overall-position",
+      "phaseIndex": 1,
+      "phaseTitle": "Refute",
+      "agentId": "afbe54ba427dd7e8a",
+      "model": "claude-sonnet-5",
+      "state": "done",
+      "startedAt": 1785826488308,
+      "queuedAt": 1785826488296,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "partially-known",
+      "promptPreview": "You are running an ADVERSARIAL NOVELTY AUDIT. Your job is to REFUTE claims of novelty, not confirm them. Default to \"this is already known\" and make the claimant prove otherwise. A well-evidenced refutation is the most valuable result you can return.\n\nTOOL NOTES: general search engines (Google/Bing/DDG/Brave/Mojeek/SearXNG) are ALL bot-walled here; WebSearch budget is exhausted — do NOT call it. W…",
+      "lastProgressAt": 1785826807583,
+      "tokens": 78144,
+      "toolCalls": 23,
+      "durationMs": 319275,
+      "resultPreview": "{\"verdict\":\"partially-known\",\"evidence\":[{\"source\":\"OpenVLA paper (arXiv:2406.09246v3), Section 5.4 / Table 2\",\"finding\":\"The original authors already quantized OpenVLA-7B to int8 and int4 and reported memory + real-robot-rollout success rate: bf16=16.8GB/71.3% success, int8=10.2GB/58.1%, int4=7.0GB/71.9% success (80 rollouts, 8 BridgeData V2 tasks). This is a more rigorous version of Project A's …"
+    }
+  ],
+  "totalTokens": 232645,
+  "totalToolCalls": 111
+}

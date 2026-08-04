@@ -21,6 +21,14 @@ Every one of these inputs produced the identical output — generated token `318
 - a pure white 224×224 image
 - uniform random noise
 
+### Verified on the official load path
+
+Reproduced with `AutoModelForVision2Seq.from_pretrained(..., trust_remote_code=True)` on transformers 4.56.2, patching only `_supports_sdpa` (without which the model cannot be constructed at all). transformers' own `add_generation_mixin_to_remote_model` injection is present (`GenerationMixin` confirmed in the MRO), so this is not an artifact of custom loading:
+
+- `vision_backbone` forward hook: **0 calls**; `projector`: **0 calls** — the vision tower never runs
+- the language model receives `input_ids` of shape **(1, 1) on all 7 generation steps**, including the first, so the 35-token prompt is sliced away immediately
+- `_supports_cache_class` is **absent** on these classes, yet the slice still happens — meaning `past_key_values` was non-None on the first `prepare_inputs_for_generation` call under 4.56.2 (the slice is gated on exactly that condition and occurs nowhere else)
+
 ### Root cause
 
 `modeling_prismatic.py::prepare_inputs_for_generation` contains:
