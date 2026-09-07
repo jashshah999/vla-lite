@@ -103,4 +103,6 @@ assert not np.allclose(a, b), "vision is being bypassed"
 - #286 / #287 — 4-bit loading crashing on `.to()`. A bitsandbytes model is placed by accelerate via `device_map`; `.to()` must not be called afterwards. The README snippet does `.from_pretrained(...).to("cuda:0")`, which is why everyone following it hits this.
 - #311 — "can't run on rigs with ≤11 GB cards". With the above, nf4 peaks at **4.60 GB** (vs 15.29 GB bf16) on a LIBERO-finetuned checkpoint, so an 8 GB card is enough. Measured latency is essentially unchanged (245 ms vs 260 ms p50); the win is memory, not speed.
 
+Until the checkpoint's remote code is updated, a drop-in shim that applies all three fixes without touching the weights is at https://github.com/jashshah999/vla-lite (`pip install "openvla-compat[quant] @ git+https://github.com/jashshah999/vla-lite"`, then `openvla-compat-check` runs the black-vs-white test above).
+
 Happy to open a PR against the HF checkpoint's remote code if that's the preferred route.

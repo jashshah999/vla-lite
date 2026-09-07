@@ -49,7 +49,8 @@ There is a one-command check for this, because "it returned an action" is not
 evidence that a VLA works:
 
 ```bash
-python openvla_compat.py     # black vs white must not match
+pip install "openvla-compat[quant] @ git+https://github.com/jashshah999/vla-lite"
+openvla-compat-check         # black vs white must not match
 ```
 
 The fix is ~40 lines in [`openvla_compat.py`](openvla_compat.py) and needs no
@@ -118,8 +119,9 @@ you have 8 GB.
 
 ## Prior art, and what is actually new here
 
-An adversarial novelty audit (3 agents, 111 verified lookups, notes in
-[`novelty-audit.json`](novelty-audit.json)) was run against this work. Most of it
+An adversarial novelty audit (3 agents, 111 verified lookups; the OpenVLA
+portion of its notes is in [`novelty-audit.json`](novelty-audit.json)) was run
+against this work. Most of it
 is **not** new, and the specifics matter:
 
 - **4-bit/8-bit OpenVLA is not new.** The OpenVLA paper itself
@@ -199,6 +201,13 @@ first implementation bypassed the Auto path and could have caused it.
   so the CPU path here is full fp32 and needs 31 GB of RAM.
 
 ## Use it
+
+```bash
+pip install "openvla-compat[quant] @ git+https://github.com/jashshah999/vla-lite"
+```
+
+`transformers` 4.50–4.x and `timm<1.0` are required (the checkpoint's remote code
+rejects `timm>=1.0`; `transformers` 5.x is untested). Then:
 
 ```python
 from openvla_compat import load_openvla, predict_action

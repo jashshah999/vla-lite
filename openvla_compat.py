@@ -252,5 +252,19 @@ def self_check(model_id: str = "openvla/openvla-7b-finetuned-libero-spatial", pr
     return not identical
 
 
+def main(argv=None) -> int:
+    """CLI: ``openvla-compat-check [--model ID] [--precision nf4]``."""
+    import argparse
+
+    ap = argparse.ArgumentParser(
+        prog="openvla-compat-check",
+        description="Load an OpenVLA checkpoint on the current stack and prove it is looking at the image.",
+    )
+    ap.add_argument("--model", default="openvla/openvla-7b-finetuned-libero-spatial")
+    ap.add_argument("--precision", default="nf4", choices=["bf16", "fp32", "int8", "nf4", "fp4"])
+    args = ap.parse_args(argv)
+    return 0 if self_check(args.model, args.precision) else 1
+
+
 if __name__ == "__main__":
-    raise SystemExit(0 if self_check() else 1)
+    raise SystemExit(main())

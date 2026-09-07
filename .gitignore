@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 results/actions/*.npy
 scoping.json
+build/
+dist/
+*.egg-info/
